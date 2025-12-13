@@ -1,0 +1,10 @@
+venv/
+config.ini
+logs/
+__pycache__/
+.env
+config
+data_files
+downloads
+extracteed 
+logs
