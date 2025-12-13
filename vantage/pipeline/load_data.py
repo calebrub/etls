@@ -9,7 +9,7 @@ config.read(r'C:\Users\rkimera\Desktop\reveloop\collboaratemd_project\config\con
 
 # Logging setup
 os.makedirs('logs', exist_ok=True)
-logging.basicConfig(filename=r'C:\Users\rkimera\Desktop\reveloop\collboaratemd_project\pipeline\logs\loader.log', level=logging.INFO)
+schema = config['POSTGRES']['schema']
 
 # PostgreSQL DB connection
 def postgres_connection():
@@ -22,7 +22,7 @@ def postgres_connection():
     )
 
 # Run SQL from file
-def run_sql(cursor, sql_path, extract_path=None):
+def run_sql(cursor, sql_path, extract_path=None, schema=schema):
     with open(sql_path, 'r') as f:
         sql_commands = f.read()
 
@@ -30,6 +30,8 @@ def run_sql(cursor, sql_path, extract_path=None):
     if extract_path:
         sql_commands = sql_commands.replace("FROM '", f"FROM '{extract_path}/")
 
+    # Set schema for operations
+    cursor.execute(f"SET search_path TO {schema};")
 
     for cmd in sql_commands.split(';'):
         if cmd.strip():
@@ -40,35 +42,35 @@ def run_sql(cursor, sql_path, extract_path=None):
                 logging.error(f"Error executing SQL in {sql_path}: {cmd.strip()[:100]}... - {str(e)}")
 
 # Check if any tables exist
-def tables_exist(cursor):
+def tables_exist(cursor, schema='public'):
     cursor.execute("""
         SELECT COUNT(*)
         FROM information_schema.tables
-        WHERE table_schema = 'public'
+        WHERE table_schema = %s
         AND table_type = 'BASE TABLE';
-    """)
+    """, (schema,))
     count = cursor.fetchone()[0]
     return count > 0
 
 # Main loader
-def load_extracted_data(extract_path):
+def load_extracted_data(extract_path, schema='public'):
     conn = postgres_connection()
     cursor = conn.cursor()
 
     try:
         
-        if tables_exist(cursor):
+        if tables_exist(cursor, schema):
             logging.info('Tables already exist — skipping CREATE')
         else:
             logging.info('Tables not found — running postgres-create.sql')
-            run_sql(cursor, 'sqlReportApi/psql-create.sql')
+            run_sql(cursor, 'sqlReportApi/psql-create.sql', schema=schema)
 
         dat_path =extract_path.replace("\\", "/")
         print('dat_path',dat_path)
 
-        run_sql(cursor, 'sqlReportApi/psql-trunc.sql')
+        run_sql(cursor, 'sqlReportApi/psql-trunc.sql', schema=schema)
         
-        run_sql(cursor, 'sqlReportApi/psql-load.sql', dat_path)
+        run_sql(cursor, 'sqlReportApi/psql-load.sql', dat_path, schema=schema)
         conn.commit()
         logging.info(f'Data Load Complete for {dat_path}')
 

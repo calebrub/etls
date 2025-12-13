@@ -24,7 +24,7 @@ def orchestrate():
 
 if __name__ == "__main__":
     orchestrate()
-    print("we run job finanly ",file = open(r"C:\Users\rkimera\Desktop\reveloop\collboaratemd_project\reportAPI.txt","w"))
+    print("we run job finanly ",file = open(r"reportAPI.txt","w"))
 
 
     

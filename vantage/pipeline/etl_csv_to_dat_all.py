@@ -13,10 +13,7 @@ import csv
 
 # Load config
 config = ConfigParser()
-config.read(r'C:\Users\rkimera\Desktop\reveloop\collboaratemd_project\config\config.ini')
-
-# Logging setup
-logging.basicConfig(filename=r'C:\Users\rkimera\Desktop\reveloop\collboaratemd_project\pipeline\logs\loader.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+config.read('config/config.ini')
 
 # PostgreSQL connection
 def postgres_connection():

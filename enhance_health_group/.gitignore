@@ -150,7 +150,7 @@ ehthumbs.db
 Desktop.ini
 
 # Config files with sensitive data
-config/config.ini
+#config/config.ini
 
 # Log files
 logs/
