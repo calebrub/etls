@@ -5,24 +5,25 @@ from configparser import ConfigParser
 
 # Config setup
 config = ConfigParser()
-config.read(r'C:\Users\rkimera\Desktop\reveloop\collboaratemd_project\config\config.ini')
+config.read('config/config.ini')
+schema = config['POSTGRES']['schema']
 
 # Logging setup
 os.makedirs('logs', exist_ok=True)
-schema = config['POSTGRES']['schema']
 
 # PostgreSQL DB connection
 def postgres_connection():
     return psycopg2.connect(
         host=config['POSTGRES']['host'],
         user=config['POSTGRES']['user'],
-        password='Reve#2025',
+        password=config['POSTGRES']['password'],
         dbname=config['POSTGRES']['database'],
-        port=config['POSTGRES']['port']
+        port=config['POSTGRES']['port'],
+        sslmode="require"
     )
 
 # Run SQL from file
-def run_sql(cursor, sql_path, extract_path=None, schema=schema):
+def run_sql(cursor, sql_path, extract_path=None, schema='public'):
     with open(sql_path, 'r') as f:
         sql_commands = f.read()
 
@@ -53,7 +54,7 @@ def tables_exist(cursor, schema='public'):
     return count > 0
 
 # Main loader
-def load_extracted_data(extract_path, schema='public'):
+def load_extracted_data(extract_path, schema=schema):
     conn = postgres_connection()
     cursor = conn.cursor()
 

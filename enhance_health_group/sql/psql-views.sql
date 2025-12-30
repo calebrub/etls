@@ -1,6 +1,4 @@
-DROP VIEW IF EXISTS ar_aging_view;
-
-CREATE VIEW ar_aging_view AS
+CREATE OR REPLACE VIEW ar_aging_view AS
 WITH ar_aging_cte AS (
     SELECT
         aa.customer_account,
@@ -97,8 +95,6 @@ LEFT JOIN payer_name_crosswalk pc
     ON pc.payer_name::text = ac.charge_primary_payer_name;
 
 -----
-DROP VIEW IF EXISTS gross_billing_view;
-
 CREATE OR REPLACE VIEW gross_billing_view AS
 WITH gross_billing_cte AS (
     SELECT
@@ -189,3 +185,111 @@ SELECT
     END AS days_on_hold_range,
     concat(claim_first_billed_month, '', claim_first_billed_year) AS claim_first_billed_ym
 FROM gross_billing_cte;
+----
+
+CREATE OR REPLACE VIEW payment_trends_view
+            (customer_account, facility_name, office_name, practice_name, charge_entered_date, charge_from_date,
+             charge_to_date, patient_full_name, payment_source, payment_allowed_amount, charge_patient_id, charge_id,
+             charge_rev_code, charge_cpt_code, type_of_bill, charge_claim_id, payer_name, primary_payer_member_id,
+             charge_amount, insurance_paid_amount, payment_total_paid, payment_total_applied,
+             charge_insurance_adjustments, charge_patient_adjustments, charge_total_adjustments, payment_received,
+             payment_entered, insurance_applied_amount, patient_applied_amount, payment_applied_amount,
+             payment_unapplied_amount, charge_from_day, charge_from_week, charge_from_month, charge_from_year,
+             payment_status, int_payment_allowed_amount, level_of_care, has_insurance_payment,
+             int_insurance_paid_amount, payment_received_day, payment_received_week, payment_received_month,
+             payment_received_year, payment_posting_tat, int_payment_applied_amount, int_payment_total_applied,
+             int_payment_total_paid, int_payment_unapplied_amount)
+as
+SELECT pt.customer_account,
+       pt.practice_name as facilty_name,
+       pt.practice_name as office_name,
+       pt.practice_name,
+       pt.charge_entered_date,
+       pt.charge_from_date,
+       pt.charge_to_date,
+       pt.patient_full_name,
+--        pt.payment_source,
+       'Patient' as payment_source,
+       pt.payment_allowed_amount,
+       pt.charge_patient_id,
+       pt.payment_charge_id as charge_id,
+       pt.charge_billed_revenue_code as charge_rev_code,
+       pt.charge_cpt_code,
+       pt.type_of_bill,
+       pt.claim_id as charge_claim_id,
+       pt.charge_primary_payer_name as payer_name,
+       pt.primary_payer_member_id,
+       pt.charge_amount,
+       pt.insurance_paid_amount,
+       pt.payment_total_paid,
+       pt.payment_total_applied,
+       pt.charge_insurance_adjustments,
+       pt.charge_patient_adjustments,
+       pt.charge_total_adjustments,
+       pt.payment_received,
+       pt.payment_entered,
+       pt.insurance_applied_amount,
+       pt.patient_applied_amount,
+       pt.payment_total_applied as payment_applied_amount,
+       pt.payment_unapplied_amount,
+       initcap(to_char(pt.charge_from_date::date::timestamp with time zone, 'day'::text))                     AS charge_from_day,
+       'Week'::text || to_char(pt.charge_from_date::date::timestamp with time zone,
+                               'IW'::text)                                                                    AS charge_from_week,
+       to_char(pt.charge_from_date::date::timestamp with time zone,
+               'Month'::text)                                                                                 AS charge_from_month,
+       to_char(pt.charge_from_date::date::timestamp with time zone,
+               'YYYY'::text)                                                                                  AS charge_from_year,
+       CASE
+           WHEN replace(replace(pt.payment_allowed_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric > 0::numeric
+               THEN 'Paid'::text
+           ELSE 'Not Paid'::text
+           END                                                                                                AS payment_status,
+       replace(replace(pt.payment_allowed_amount::text, '$'::text, ''::text), ','::text,
+               ''::text)::numeric                                                                             AS int_payment_allowed_amount,
+       lc.level_of_care,
+       CASE
+           WHEN replace(replace(pt.insurance_paid_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric > 0::numeric
+               THEN true
+           ELSE false
+           END                                                                                                AS has_insurance_payment,
+       replace(replace(pt.insurance_paid_amount::text, '$'::text, ''::text), ','::text,
+               ''::text)::numeric                                                                             AS int_insurance_paid_amount,
+       initcap(to_char(pt.payment_received::date::timestamp with time zone,
+                       'day'::text))                                                                          AS payment_received_day,
+       'Week'::text || to_char(pt.payment_received::date::timestamp with time zone,
+                               'IW'::text)                                                                    AS payment_received_week,
+       to_char(pt.payment_received::date::timestamp with time zone,
+               'Month'::text)                                                                                 AS payment_received_month,
+       to_char(pt.payment_received::date::timestamp with time zone,
+               'YYYY'::text)                                                                                  AS payment_received_year,
+       pt.payment_received::date - pt.payment_entered::date                                                   AS payment_posting_tat,
+       replace(replace(pt.patient_applied_amount::text, '$'::text, ''::text), ','::text,
+               ''::text)::numeric                                                                             AS int_payment_applied_amount,
+       replace(replace(pt.payment_total_applied::text, '$'::text, ''::text), ','::text,
+               ''::text)::numeric                                                                             AS int_payment_total_applied,
+       replace(replace(pt.payment_total_paid::text, '$'::text, ''::text), ','::text,
+               ''::text)::numeric                                                                             AS int_payment_total_paid,
+       replace(replace(pt.payment_unapplied_amount::text, '$'::text, ''::text), ','::text,
+               ''::text)::numeric                                                                             AS int_payment_unapplied_amount
+FROM payment_trend pt
+         LEFT JOIN loc_crosswalk lc ON lc.rev_code::text = pt.charge_billed_revenue_code::text;
+
+------
+CREATE OR REPLACE VIEW chage_on_hold(facility_name, claim_status, level_of_care, total_amount) as
+SELECT practice_name as facility_name,
+       claim_status,
+       charge_cpt_code                                                                               AS level_of_care,
+       sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount
+FROM charges_on_hold coh
+GROUP BY facility_name, claim_status, charge_cpt_code;
+
+------
+CREATE OR REPLACE VIEW v_charges_on_hold(facility_name, claim_status, level_of_care, total_amount) as
+SELECT practice_name as facility_name,
+       claim_status,
+       charge_cpt_code                                                                               AS level_of_care,
+       sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount
+FROM charges_on_hold coh
+GROUP BY facility_name, claim_status, charge_cpt_code;
+
+------

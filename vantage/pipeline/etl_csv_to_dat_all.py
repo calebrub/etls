@@ -14,13 +14,14 @@ import csv
 # Load config
 config = ConfigParser()
 config.read('config/config.ini')
+schema = config['POSTGRES']['schema']
 
 # PostgreSQL connection
 def postgres_connection():
     return psycopg2.connect(
         host=config['POSTGRES']['host'],
         user=config['POSTGRES']['user'],
-        password='Reve#2025',
+        password=config['POSTGRES']['password'],
         dbname=config['POSTGRES']['database'],
         port=config['POSTGRES']['port']
     )

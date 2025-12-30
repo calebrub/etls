@@ -23,9 +23,6 @@ def get_config(section, key, fallback=None):
     env_key = f"{section}_{key}".upper()
     return os.getenv(env_key, config.get(section, key, fallback=fallback))
 
-# Setup logging
-logging.basicConfig(filename='logs/loader.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 def postgres_connection():
     return psycopg2.connect(
         host=get_config('POSTGRES', 'host'),
@@ -149,7 +146,7 @@ def load_csv_to_db():
         print(f"Created {table_name} with {len(df)} rows")
     
     # Run views SQL
-    with open('sqlReportApi/psql-views.sql', 'r') as f:
+    with open('sql/psql-views.sql', 'r') as f:
         sql = f.read()
     
     sql = f"SET search_path TO {schema};\n" + sql
