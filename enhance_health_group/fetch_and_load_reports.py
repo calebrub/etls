@@ -464,8 +464,7 @@ def main():
     print("STARTING ETL PIPELINE")
     print("=" * 80 + "\n")
 
-    # Uncomment to fetch reports
-    # fetch_reports_to_csv()
+    fetch_reports_to_csv()
 
     load_csvs_to_db()
 
