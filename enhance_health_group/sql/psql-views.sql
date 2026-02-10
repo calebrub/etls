@@ -275,7 +275,7 @@ SELECT pt.customer_account,
                ''::text)::numeric                                                                             AS int_payment_unapplied_amount,
     instance_key
 FROM payment_trend pt
-         LEFT JOIN loc_crosswalk lc ON lc.rev_code::text = pt.charge_billed_revenue_code::text;
+         LEFT JOIN loc_crosswalk lc ON lc.rev_code::text = pt.charge_rev_code::text;
 
 ------
 CREATE OR REPLACE VIEW chage_on_hold(facility_name, claim_status, level_of_care, total_amount) as
