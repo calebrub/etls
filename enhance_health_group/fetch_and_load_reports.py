@@ -560,15 +560,20 @@ def load_csvs_to_db():
 
     # ---------- Load (safe) ----------
     for table_name, df in tables.items():
-        truncate_table(engine, schema, table_name)
-        df.to_sql(
-            table_name,
-            engine,
-            schema=schema,
-            if_exists="append",
-            index=False
-        )
-        print(f"✓ Loaded {schema}.{table_name} ({len(df)} rows)")
+        try:
+            truncate_table(engine, schema, table_name)
+            df.to_sql(
+                table_name,
+                engine,
+                schema=schema,
+                if_exists="append",
+                index=False
+            )
+            print(f"✓ Loaded {schema}.{table_name} ({len(df)} rows)")
+        except Exception as e:
+            print(f"✗ Failed to load {schema}.{table_name}: {str(e)}")
+            engine.dispose()  # Close all connections
+            raise
 
     run_sql_files(engine, schema)
 
@@ -582,7 +587,7 @@ def main():
     print("STARTING ETL PIPELINE")
     print("=" * 80 + "\n")
 
-    fetch_reports_to_csv()
+    # fetch_reports_to_csv()
 
     load_csvs_to_db()
 
