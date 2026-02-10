@@ -6,42 +6,67 @@ from datetime import date
 
 import requests
 import logging
-import ast
 import xml.etree.ElementTree as ET
 import psycopg2
-from configparser import RawConfigParser
 import csv
 import pandas as pd
 import re
 from sqlalchemy import create_engine, text
 import glob
+from config_loader import ConfigLoader
+from enhance_health_group.convert_vantage_to_enhance import convert_vantage_to_enhance
 
-# Load config
-config = RawConfigParser()
-config.read('config/config.ini')
-
-
-# Override with environment variables if available
-def get_config(section, key, fallback=None):
-    env_key = f"{section}_{key}".upper()
-    return os.getenv(env_key, config.get(section, key, fallback=fallback))
+# Load config using multi-instance aware loader
+# Prefer the new Python config if present, otherwise fall back to the old INI
+config_path = 'config/config.py'
+config_loader = ConfigLoader(config_path)
+postgres_config = config_loader.get_postgres_config()
 
 
 def postgres_connection():
     return psycopg2.connect(
-        host=get_config('POSTGRES', 'host'),
-        user=get_config('POSTGRES', 'user'),
-        password=get_config('POSTGRES', 'password'),
-        dbname=get_config('POSTGRES', 'database'),
-        port=get_config('POSTGRES', 'port')
+        host=postgres_config['host'],
+        user=postgres_config['user'],
+        password=postgres_config['password'],
+        dbname=postgres_config['database'],
+        port=postgres_config['port']
     )
 
 
-def load_report_matrix():
+def load_report_matrix(instance_key=None):
+    """
+    Load report matrix from database.
+    If instance_key is provided, only load reports for that instance.
+    Otherwise, load all reports.
+
+    Returns: {
+        'account_id': {
+            'report_name': 'identifier'
+        }
+    }
+    """
     conn = postgres_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        f"SELECT customer_account, report_name, identifier FROM {get_config('POSTGRES', 'schema')}.account_reports WHERE status = 1")
+    schema = postgres_config['schema']
+
+    # Check if instance_key column exists
+    cursor.execute(f"""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = %s AND table_name = 'account_reports' AND column_name = 'instance_key'
+    """, (schema,))
+
+    has_instance_column = cursor.fetchone() is not None
+
+    if has_instance_column and instance_key:
+        cursor.execute(
+            f"SELECT customer_account, report_name, identifier FROM {schema}.account_reports WHERE status = 1 AND instance_key = %s",
+            (instance_key,)
+        )
+    else:
+        cursor.execute(
+            f"SELECT customer_account, report_name, identifier FROM {schema}.account_reports WHERE status = 1"
+        )
 
     report_matrix = {}
     for customer_account, report_name, identifier in cursor.fetchall():
@@ -53,64 +78,111 @@ def load_report_matrix():
 
 
 def fetch_reports_to_csv():
-    base_url = get_config('API', 'report_api_base_url')
-    username = get_config('API', 'username')
-    password = get_config('API', 'password')
-    customers = ast.literal_eval(get_config('CUSTOMERS', 'accounts'))
+    """
+    Fetch reports for all instances and write to CSV files.
+    Creates separate CSV files per instance if multiple instances exist.
+    """
+    instances = config_loader.get_instances()
+    instance_list = config_loader.list_instances()
+    schema = postgres_config['schema']
+
+    print(f"\n{'=' * 80}")
+    print(f"FETCH REPORTS TO CSV - MULTI-INSTANCE MODE")
+    print(f"{'=' * 80}")
+    print(f"Processing {len(instance_list)} instance(s): {', '.join(instance_list)}\n")
+
+    # Check if account_reports table has instance_key column for data isolation
+    conn = postgres_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = %s AND table_name = 'account_reports' AND column_name = 'instance_key'
+    """, (schema,))
+    has_instance_column = cursor.fetchone() is not None
+    cursor.close()
+    conn.close()
 
     csv_dir = 'csv_files'
     os.makedirs(csv_dir, exist_ok=True)
 
-    report_matrix = load_report_matrix()
-    all_report_names = set()
-    for customer in customers:
-        all_report_names.update(report_matrix.get(customer, {}).keys())
+    for instance_key in instance_list:
+        instance_config = instances[instance_key]
+        print(f"\n{'-' * 80}")
+        print(f"INSTANCE: {instance_key}")
+        print(f"{'-' * 80}")
 
-    for report_name in all_report_names:
-        all_rows = []
-        headers_with_customer = None
+        base_url = instance_config['api_base_url']
+        username = instance_config['username']
+        password = instance_config['password']
+        customers = instance_config['accounts']
 
-        for customer_id in customers:
-            report_id = report_matrix.get(customer_id, {}).get(report_name)
-            if not report_id:
-                continue
+        # Load reports for this instance
+        report_matrix = load_report_matrix(instance_key if has_instance_column else None)
 
-            url = f"{base_url}/customer/{customer_id}/reports/results/{report_id}"
-            response = requests.post(url, auth=(username, password))
+        if not report_matrix:
+            print(f"No reports found for instance {instance_key}")
+            continue
 
-            if response.status_code == 200:
-                root = ET.fromstring(response.content)
-                data_element = root.find('Data')
-                if data_element is not None and data_element.text:
-                    zip_bytes = base64.b64decode(data_element.text)
-                    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
-                        for zip_info in zip_file.infolist():
-                            if zip_info.filename.endswith('.csv'):
-                                with zip_file.open(zip_info) as csv_file:
-                                    decoded = io.TextIOWrapper(csv_file, encoding='utf-8')
-                                    csv_reader = csv.reader(decoded)
+        all_report_names = set()
+        for customer in customers:
+            all_report_names.update(report_matrix.get(customer, {}).keys())
 
-                                    try:
-                                        headers = [h.strip() for h in next(csv_reader)]
-                                    except StopIteration:
-                                        continue
+        for report_name in sorted(all_report_names):
+            all_rows = []
+            headers_with_customer = None
 
-                                    if headers_with_customer is None:
-                                        headers_with_customer = ['customer_account'] + headers
+            for customer_id in customers:
+                report_id = report_matrix.get(customer_id, {}).get(report_name)
+                if not report_id:
+                    continue
 
-                                    for row in csv_reader:
-                                        row_values = [v.strip() if v.strip() else None for v in row]
-                                        while len(row_values) < len(headers):
-                                            row_values.append(None)
-                                        all_rows.append([customer_id] + row_values)
+                url = f"{base_url}/customer/{customer_id}/reports/results/{report_id}"
+                response = requests.post(url, auth=(username, password))
 
-        if all_rows and headers_with_customer:
-            file_path = os.path.join(csv_dir, f"{report_name}.csv")
-            with open(file_path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(headers_with_customer)
-                writer.writerows(all_rows)
-            logging.info(f"CSV file written: {file_path}")
+                if response.status_code == 200:
+                    root = ET.fromstring(response.content)
+                    data_element = root.find('Data')
+                    if data_element is not None and data_element.text:
+                        zip_bytes = base64.b64decode(data_element.text)
+                        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
+                            for zip_info in zip_file.infolist():
+                                if zip_info.filename.endswith('.csv'):
+                                    with zip_file.open(zip_info) as csv_file:
+                                        decoded = io.TextIOWrapper(csv_file, encoding='utf-8')
+                                        csv_reader = csv.reader(decoded)
+
+                                        try:
+                                            headers = [h.strip() for h in next(csv_reader)]
+                                        except StopIteration:
+                                            continue
+
+                                        if headers_with_customer is None:
+                                            headers_with_customer = ['customer_account', 'instance_key'] + headers
+
+                                        for row in csv_reader:
+                                            row_values = [v.strip() if v.strip() else None for v in row]
+                                            while len(row_values) < len(headers):
+                                                row_values.append(None)
+                                            all_rows.append([customer_id, instance_key] + row_values)
+
+            if all_rows and headers_with_customer:
+                # Create subdirectory for instance if multiple instances
+                if len(instance_list) > 1:
+                    instance_csv_dir = os.path.join(csv_dir, instance_key)
+                    os.makedirs(instance_csv_dir, exist_ok=True)
+                    file_path = os.path.join(instance_csv_dir, f"{report_name}.csv")
+                else:
+                    file_path = os.path.join(csv_dir, f"{report_name}.csv")
+
+                with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(headers_with_customer)
+                    writer.writerows(all_rows)
+                logging.info(f"CSV file written: {file_path}")
+                print(f"✓ Fetched {report_name}: {len(all_rows)} rows from {len([r for r in all_rows if r[0]])}")
+            else:
+                print(f"⊘ No data for report: {report_name}")
 
 
 def to_snake_case(name):
@@ -393,17 +465,20 @@ def truncate_table(engine, schema, table_name):
 # ---------- Main ETL ----------
 
 def load_csvs_to_db():
-    schema = get_config("POSTGRES", "schema")
+    schema = postgres_config['schema']
 
     engine = create_engine(
-        f"postgresql://{get_config('POSTGRES', 'user')}:"
-        f"{get_config('POSTGRES', 'password')}@"
-        f"{get_config('POSTGRES', 'host')}:"
-        f"{get_config('POSTGRES', 'port')}/"
-        f"{get_config('POSTGRES', 'database')}"
+        f"postgresql://{postgres_config['user']}:"
+        f"{postgres_config['password']}@"
+        f"{postgres_config['host']}:"
+        f"{postgres_config['port']}/"
+        f"{postgres_config['database']}"
     )
 
-    csv_files = glob.glob("csv_files/*.csv")
+    # Get CSV files from all subdirectories (instances) or root csv_files dir
+    csv_files = glob.glob("csv_files/**/*.csv", recursive=True)
+    convert_vantage_to_enhance()
+
     tables = {}
 
     print("\n" + "=" * 80)
@@ -411,10 +486,20 @@ def load_csvs_to_db():
     print("=" * 80 + "\n")
 
     # ---------- Extract + Transform (NO DB TOUCH) ----------
+    print("csv_files", csv_files)
     for csv_file in csv_files:
+        # Extract table name from filename
         table_name = to_snake_case(os.path.splitext(os.path.basename(csv_file))[0])
 
         df = pd.read_csv(csv_file, low_memory=False)
+
+        # Preserve instance_key column if it exists
+        instance_key_col = None
+        if 'instance_key' in df.columns:
+            instance_key_col = df['instance_key'].copy()
+            # Remove it temporarily for processing
+            df = df.drop(columns=['instance_key'])
+
         df.columns = [to_snake_case(c) for c in df.columns]
 
         # Promote types in correct order
@@ -426,8 +511,41 @@ def load_csvs_to_db():
             if df[col].isna().all():
                 df[col] = ""
 
+        # Add instance_key column back if it existed
+        if instance_key_col is not None:
+            df.insert(1, 'instance_key', instance_key_col)
+
+        # Merge with existing dataframe if table name already exists
+        if table_name in tables:
+            existing_df = tables[table_name]
+            existing_cols = set(existing_df.columns)
+            new_cols = set(df.columns)
+
+            # Check for column mismatches
+            missing_cols = existing_cols - new_cols
+            extra_cols = new_cols - existing_cols
+
+            # Add missing columns to current df with empty strings
+            if missing_cols:
+                for col in missing_cols:
+                    df[col] = ""
+                print(f"  ⚠ Added missing columns to {csv_file}: {', '.join(sorted(missing_cols))}")
+
+            # Remove extra columns from current df if they exist in existing but not in new
+            if extra_cols:
+                print(f"  ⚠ Removing extra columns from {csv_file}: {', '.join(sorted(extra_cols))}")
+                df = df.drop(columns=extra_cols, errors='ignore')
+
+            # Ensure column order matches existing dataframe
+            df = df[list(existing_df.columns)]
+
+            # Safe to merge - structures are now identical
+            df = pd.concat([existing_df, df], ignore_index=True)
+            print(f"✓ Merged CSV: {csv_file} ({len(df)} rows total in table '{table_name}')")
+        else:
+            print(f"✓ Loaded CSV: {csv_file} ({len(df)} rows, {len(df.columns)} columns)")
+
         tables[table_name] = df
-        print(f"✓ Loaded CSV: {csv_file} ({len(df)} rows, {len(df.columns)} columns)")
 
     print("\n" + "=" * 80)
     print("VALIDATION PHASE")

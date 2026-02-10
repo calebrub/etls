@@ -1,5 +1,7 @@
 import os
 import io
+from time import sleep
+
 import requests
 import logging
 import ast
@@ -11,7 +13,8 @@ import time
 
 # Load config
 config = ConfigParser()
-config.read('config/config.ini')
+config.read('../config/config.ini')
+
 base_url = config['API']['report_api_base_url']
 accounts = ast.literal_eval(config['CUSTOMERS']['accounts'])    
 username = config['API']['username']
@@ -22,7 +25,7 @@ def postgres_connection():
     return psycopg2.connect(
         host=config['POSTGRES']['host'],
         user=config['POSTGRES']['user'],
-        password='Reve#2025',
+        password=config['POSTGRES']['password'],
         dbname=config['POSTGRES']['database'],
         port=config['POSTGRES']['port']
     )
@@ -33,7 +36,13 @@ def handle_report_response(response_text, customer_account, report_name):
     ns = {'ns1': 'http://www.collaboratemd.com/api/v1/'}
     status = root.find('ns1:Status', ns).text
     identifier = root.find('ns1:Identifier', ns).text
-    print('identifier',identifier)
+    
+    status_message_element = root.find('ns1:StatusMessage', ns)
+    status_message = status_message_element.text if status_message_element is not None else ""
+    print('identifier', identifier, "| StatusMessage", status_message)
+
+    if "still running" in status_message:
+        return "RUNNING"
 
     if status not in ('SUCCESS', 'REPORT RUNNING'):
         logging.error(f"Failed to generate report for {customer_account}, {report_name}")
@@ -42,6 +51,16 @@ def handle_report_response(response_text, customer_account, report_name):
     try:
         conn = postgres_connection()
         cur = conn.cursor()
+
+        # Check for duplicate
+        cur.execute(f"SELECT 1 FROM {schema}.account_reports WHERE customer_account = %s AND report_name = %s AND identifier = %s",
+                    (customer_account, report_name, identifier))
+
+        if cur.fetchone():
+            print(f"Duplicate identifier {identifier} detected for {report_name} - account {customer_account}")
+            cur.close()
+            conn.close()
+            return "DUPLICATE"
 
         # Set existing records' status to 0
         cur.execute(f"""
@@ -70,24 +89,37 @@ def handle_report_response(response_text, customer_account, report_name):
 
 def generate_report_for_all_accounts(report_id, filter_id, report_name):
     for account in accounts:
-        url = f"{base_url}/customer/{account}/reports/{report_id}/filter/{filter_id}/run"
-        
-        try:
-            response = requests.post(url, auth=(username, password))
-            print(f"{report_name.upper()} | {account} | Status: {response.status_code}")
+        while True:
+            url = f"{base_url}/customer/{account}/reports/{report_id}/filter/{filter_id}/run"
+            
+            try:
+                response = requests.post(url, auth=(username, password))
+                print(f"Report name: {report_name.upper()} | Account: {account} | Status: {response.status_code}")
 
-            if response.status_code == 200:
-                print(response.text)
-                success = handle_report_response(response.text, account, report_name)
-                if success:
-                    print(f"{report_name} report started and DB updated for account {account}")
+                if response.status_code == 200:
+                    print(response.text)
+                    result = handle_report_response(response.text, account, report_name)
+                    
+                    if result == "RUNNING":
+                        print(f"Report for {account} is still running. Waiting 60 seconds before retrying...")
+                        time.sleep(60)
+                        continue
+                    elif result == "DUPLICATE":
+                        print(f"Duplicate report identifier already exists. retrying...")
+                        continue
+                    elif result == True:
+                        print(f"{report_name} report started and DB updated for account {account}")
+                        break
+                    else:
+                        print(f"Failed to handle response for {report_name} - account {account}")
+                        break
                 else:
-                    print(f"Failed to handle response for {report_name} - account {account}")
-            else:
-                print(f"API call failed for {report_name} - account {account} - Status: {response.status_code}")
+                    print(f"API call failed for {report_name} - account {account} - Status: {response.status_code}")
+                    break
 
-        except Exception as e:
-            logging.error(f"Exception for {report_name} - account {account}: {str(e)}")
+            except Exception as e:
+                logging.error(f"Exception for {report_name} - account {account}: {str(e)}")
+                break
 
         time.sleep(10)  # Delay to avoid duplicate identifiers
 

@@ -4,6 +4,7 @@ WITH ar_aging_cte AS (
         aa.customer_account,
         aa.charge_id,
         aa.charge_claim_id AS claim_id,
+        aa.instance_key,
         aa.charge_first_bill_date as claim_first_billed_date,
         aa.charge_from_date,
         aa.charge_to_date,
@@ -133,7 +134,8 @@ WITH gross_billing_cte AS (
         to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'YYYY') AS claim_first_billed_year,
         lc.level_of_care AS loc,
         replace(replace(gb.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
-        gb.claim_first_billed_date::date - EXTRACT(dow FROM gb.claim_first_billed_date::date)::integer AS first_billed_week_date
+        gb.claim_first_billed_date::date - EXTRACT(dow FROM gb.claim_first_billed_date::date)::integer AS first_billed_week_date,
+                gb.instance_key
     FROM gross_billing gb
     LEFT JOIN loc_crosswalk lc ON lc.rev_code::text = gb.charge_rev_code::text
 )
@@ -183,7 +185,7 @@ SELECT
         WHEN days_on_hold > 90 THEN 'over 90 days'
         ELSE NULL
     END AS days_on_hold_range,
-    concat(claim_first_billed_month, '', claim_first_billed_year) AS claim_first_billed_ym
+    concat(claim_first_billed_month, '', claim_first_billed_year) AS claim_first_billed_ym,     instance_key
 FROM gross_billing_cte;
 ----
 
@@ -270,7 +272,8 @@ SELECT pt.customer_account,
        replace(replace(pt.payment_total_paid::text, '$'::text, ''::text), ','::text,
                ''::text)::numeric                                                                             AS int_payment_total_paid,
        replace(replace(pt.payment_unapplied_amount::text, '$'::text, ''::text), ','::text,
-               ''::text)::numeric                                                                             AS int_payment_unapplied_amount
+               ''::text)::numeric                                                                             AS int_payment_unapplied_amount,
+    instance_key
 FROM payment_trend pt
          LEFT JOIN loc_crosswalk lc ON lc.rev_code::text = pt.charge_billed_revenue_code::text;
 
@@ -279,17 +282,19 @@ CREATE OR REPLACE VIEW chage_on_hold(facility_name, claim_status, level_of_care,
 SELECT practice_name as facility_name,
        claim_status,
        charge_cpt_code                                                                               AS level_of_care,
-       sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount
+       sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount,
+       instance_key
 FROM charges_on_hold coh
-GROUP BY facility_name, claim_status, charge_cpt_code;
+GROUP BY facility_name, claim_status, charge_cpt_code, instance_key;
 
 ------
 CREATE OR REPLACE VIEW v_charges_on_hold(facility_name, claim_status, level_of_care, total_amount) as
 SELECT practice_name as facility_name,
        claim_status,
        charge_cpt_code                                                                               AS level_of_care,
-       sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount
+       sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount,
+        instance_key
 FROM charges_on_hold coh
-GROUP BY facility_name, claim_status, charge_cpt_code;
+GROUP BY facility_name, claim_status, charge_cpt_code, instance_key;
 
 ------
