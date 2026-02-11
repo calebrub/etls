@@ -285,7 +285,7 @@ SELECT practice_name as facility_name,
        sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount,
        instance_key
 FROM charges_on_hold coh
-GROUP BY facility_name, claim_status, charge_cpt_code, instance_key;
+GROUP BY  coh.practice_name, facility_name, claim_status, charge_cpt_code, instance_key;
 
 ------
 CREATE OR REPLACE VIEW v_charges_on_hold(facility_name, claim_status, level_of_care, total_amount) as
@@ -295,6 +295,6 @@ SELECT practice_name as facility_name,
        sum(replace(replace(charge_amount::text, '$'::text, ''::text), ','::text, ''::text)::numeric) AS total_amount,
         instance_key
 FROM charges_on_hold coh
-GROUP BY facility_name, claim_status, charge_cpt_code, instance_key;
+GROUP BY  coh.practice_name, facility_name, claim_status, charge_cpt_code, instance_key;
 
 ------
