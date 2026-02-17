@@ -14,7 +14,7 @@ POSTGRES = {
     'password': 'uO63mP5df9KvLhVZZHdkr3cG',
     'database': 'REVETLCUSPRODDB',
     'port': '5432',
-    'schema': 'dw_data',
+    'schema': 'enhance_health_group',
 }
 
 INSTANCES = {
@@ -27,9 +27,7 @@ INSTANCES = {
             '10026936',
             '10026716',
             '10023994',
-            '10026559',
-            '10023851',
-
+            '10026559',  # '10023851', Rebel Removed
         ],
         'report_configs': [
             {"report_id": "10078378", "filter_id": "10141925", "name": "ar_aging"},
@@ -54,17 +52,16 @@ INSTANCES = {
         'accounts': [
             '10031998',
             '10032271',
-            '10031999',
             '10032272',
             '10034661',
             '10034812',
             '10034187',
-            '10032876',
+            '10032876',    # '10031999', Billing Service Account, No Data
         ],
-        # This instance uses a smaller, different report set
+
         'report_configs': [
             {"report_id": "10062054", "filter_id": "10137065", "name": "ar_aging"},
-            {"report_id": "10062055", "filter_id": "10137067", "name": "charges_on_hold"},
+            {"report_id": "10083396", "filter_id": "10143555", "name": "charges_on_hold"},
             {"report_id": "10062056", "filter_id": "10137069", "name": "claim_stage_breakdown"},
             {"report_id": "10062057", "filter_id": "10137072", "name": "denial_trends"},
             {"report_id": "10062059", "filter_id": "10137074", "name": "gross_billing"},

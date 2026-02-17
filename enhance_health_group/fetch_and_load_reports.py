@@ -477,7 +477,6 @@ def load_csvs_to_db():
 
     # Get CSV files from all subdirectories (instances) or root csv_files dir
     csv_files = glob.glob("csv_files/**/*.csv", recursive=True)
-    # convert_vantage_to_enhance()
 
     tables = {}
 
@@ -587,7 +586,7 @@ def main():
     print("STARTING ETL PIPELINE")
     print("=" * 80 + "\n")
 
-    # fetch_reports_to_csv()
+    fetch_reports_to_csv()
 
     load_csvs_to_db()
 
