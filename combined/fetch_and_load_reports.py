@@ -2,7 +2,7 @@ import os
 import io
 import zipfile
 import base64
-from datetime import date
+from datetime import date, datetime
 
 import requests
 import logging
@@ -14,7 +14,6 @@ import re
 from sqlalchemy import create_engine, text
 import glob
 from config_loader import ConfigLoader
-from enhance_health_group.convert_vantage_to_enhance import convert_vantage_to_enhance
 
 # Load config using multi-instance aware loader
 # Prefer the new Python config if present, otherwise fall back to the old INI
@@ -241,8 +240,15 @@ def promote_numeric_columns(df):
         non_null_converted = numeric_series.notna()
 
         # If all non-empty values successfully converted to numeric, use it
-        if non_null_original.sum() > 0 and (non_null_original <= non_null_converted).all():
-            df[col] = numeric_series
+        # Use numpy boolean arrays to avoid static-analysis confusion about Series/bool
+        mask = non_null_original
+        mask_arr = mask.to_numpy(dtype=bool)
+        conv_arr = non_null_converted.to_numpy(dtype=bool)
+        num_mask = int(mask_arr.sum())
+        if num_mask > 0:
+            num_converted = int((conv_arr & mask_arr).sum())
+            if num_converted == num_mask:
+                df[col] = numeric_series
 
     return df
 
@@ -297,24 +303,54 @@ def infer_df_structure(df):
     """
     Infer expected DB structure from DataFrame based on actual pandas dtypes.
     This matches what pandas.to_sql() will create.
+
+    Robust rules (to avoid misclassifying pandas Timestamp as date):
+    1. Special-case 'created_at' -> timestamp without time zone
+    2. If pandas dtype is datetime64 -> timestamp without time zone
+    3. If dtype is integer/nullable-int -> bigint
+    4. If dtype is float64 -> double precision
+    5. If values are python date objects (but NOT datetime) -> date
+    6. Otherwise -> text
     """
     structure = []
     for col in df.columns:
         dtype = df[col].dtype
 
-        # Check if it's a date column (from promote_date_columns)
-        is_date = False
-        if len(df[col].dropna()) > 0:
-            is_date = df[col].dropna().apply(lambda v: isinstance(v, date)).all()
+        # Special-case created_at: always map to timestamp
+        if col.lower() == 'created_at':
+            structure.append((col, "timestamp without time zone"))
+            continue
 
-        if is_date:
-            structure.append((col, "date"))
-        elif dtype == 'int64' or dtype == 'Int64':
+        # If pandas has datetime64 dtype, map to timestamp
+        if pd.api.types.is_datetime64_any_dtype(dtype):
+            structure.append((col, "timestamp without time zone"))
+            continue
+
+        # Integer types
+        if dtype == 'int64' or dtype == 'Int64':
             structure.append((col, "bigint"))
-        elif dtype == 'float64':
+            continue
+
+        # Floats
+        if dtype == 'float64':
             structure.append((col, "double precision"))
-        else:
-            structure.append((col, "text"))
+            continue
+
+        # Check for python.date-only values (exclude datetime)
+        is_date_only = False
+        non_null = df[col].dropna()
+        if len(non_null) > 0:
+            try:
+                is_date_only = non_null.apply(lambda v: isinstance(v, date) and not isinstance(v, datetime)).all()
+            except Exception:
+                is_date_only = False
+
+        if is_date_only:
+            structure.append((col, "date"))
+            continue
+
+        # Fallback to text
+        structure.append((col, "text"))
 
     return structure
 
@@ -387,6 +423,15 @@ def validate_all_tables(engine, schema, tables):
         if db_struct is None:
             print(f"✓ Table {schema}.{table_name} does not exist → will be created")
             continue
+
+        # Check for created_at mismatch specifically
+        db_cols = {col for col, _ in db_struct}
+        if 'created_at' in df.columns and 'created_at' not in db_cols:
+            print(f"  → Adding missing 'created_at' column to {schema}.{table_name}")
+            with engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE "{schema}"."{table_name}" ADD COLUMN created_at TIMESTAMP WITHOUT TIME ZONE'))
+            # Refresh db_struct
+            db_struct = get_db_structure(engine, schema, table_name)
 
         df_struct = infer_df_structure(df)
 
@@ -513,6 +558,9 @@ def load_csvs_to_db():
         # Add instance_key column back if it existed
         if instance_key_col is not None:
             df.insert(1, 'instance_key', instance_key_col)
+
+        # Add created_at column
+        df['created_at'] = pd.Timestamp.now()
 
         # Merge with existing dataframe if table name already exists
         if table_name in tables:

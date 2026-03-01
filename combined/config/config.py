@@ -14,7 +14,7 @@ POSTGRES = {
     'password': 'uO63mP5df9KvLhVZZHdkr3cG',
     'database': 'REVETLCUSPRODDB',
     'port': '5432',
-    'schema': 'enhance_health_group',
+    'schema': 'dw_combined',
 }
 
 INSTANCES = {
