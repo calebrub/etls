@@ -97,10 +97,12 @@ SELECT
     concat(claim_first_billed_month, '', claim_first_billed_year) AS claim_first_billed_ym,
     instance_key,
     claim_first_billed_date_cln,
-    int_charge_amount_cln
+    int_charge_amount_cln,
+    pnc.payer_code AS payer_class
 FROM gross_billing_cte
 LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
-LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code;
+LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
+LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = gross_billing_cte.charge_primary_payer_name;
 
 ----
 
@@ -115,7 +117,7 @@ CREATE OR REPLACE VIEW payment_trends_view
              payment_status, int_payment_allowed_amount, level_of_care, has_insurance_payment,
              int_insurance_paid_amount, payment_received_day, payment_received_week, payment_received_month,
              payment_received_year, payment_posting_tat, int_payment_applied_amount, int_payment_total_applied,
-             int_payment_total_paid, int_payment_unapplied_amount)
+             int_payment_total_paid, int_payment_unapplied_amount, payer_class, instance_key)
 AS
 SELECT
     pt.customer_account,
@@ -173,10 +175,12 @@ SELECT
     replace(replace(pt.payment_total_applied::text, '$', ''), ',', '')::numeric AS int_payment_total_applied,
     replace(replace(pt.payment_total_paid::text, '$', ''), ',', '')::numeric AS int_payment_total_paid,
     replace(replace(pt.payment_unapplied_amount::text, '$', ''), ',', '')::numeric AS int_payment_unapplied_amount,
+    pnc.payer_code AS payer_class,
     instance_key
 FROM payment_trend pt
 LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = ltrim(split_part(regexp_replace(pt.charge_rev_code, '\.0$', ''), ' ', 1), '0')
-LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = ltrim(split_part(regexp_replace(pt.charge_cpt_code, '\.0$', ''), ' ', 1), '0');
+LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = ltrim(split_part(regexp_replace(pt.charge_cpt_code, '\.0$', ''), ' ', 1), '0')
+LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = pt.charge_primary_payer_name;
 
 ----
 
@@ -209,7 +213,8 @@ WITH charges_on_hold_cte AS (
         -- derived fields
         coh.charge_entered_date::date AS date_charge_entered,
         CURRENT_DATE - coh.charge_entered_date::date AS days_on_hold,
-        replace(replace(coh.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount
+        replace(replace(coh.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
+        coh.charge_primary_payer_name
     FROM charges_on_hold coh
 )
 SELECT
@@ -248,10 +253,13 @@ SELECT
         WHEN days_on_hold > 90 THEN 'over 90 days'
         ELSE NULL
     END AS days_on_hold_range,
-    int_charge_amount
+    int_charge_amount,
+    pnc.payer_code as payer_class,
+    charge_primary_payer_name
 FROM charges_on_hold_cte
 LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
-LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code;
+LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
+LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = charge_primary_payer_name;
 
 ----
 
