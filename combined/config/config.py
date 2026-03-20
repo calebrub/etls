@@ -70,6 +70,9 @@ INSTANCES = {
             {"report_id": "10062064", "filter_id": "10137071", "name": "rcm_productivity"},
             {"report_id": "10062065", "filter_id": "10137078", "name": "user_time_spread"},
             {"report_id": "10062066", "filter_id": "10137079", "name": "write_off_trend"},
+            {"report_id": "10085814", "filter_id": "10144335", "name": "pdr3_calculator"},
+            {"report_id": "10085817", "filter_id": "10144336", "name": "rev_rec_charges"},
+            {"report_id": "10085815", "filter_id": "10144337", "name": "rev_rec_payments"}
     ],
     },
 }

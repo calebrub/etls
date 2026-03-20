@@ -379,8 +379,111 @@ SELECT
     concat(ac.claim_first_billed_month, '', ac.claim_first_billed_year)
         AS claim_first_billed_ym,
 
-    pc.payer_code
+    pc.payer_code as payer_class
 
 FROM ar_aging_cte ac
          LEFT JOIN payer_name_crosswalk pc
                    ON pc.payer_name::text = ac.charge_primary_payer_name;
+
+CREATE OR REPLACE VIEW pdr3_calculator_view AS
+WITH base AS (
+    SELECT
+        p.*,
+
+        -- 1. Location Code
+        split_part(p.practice_name, ' ', 1) AS location_code,
+
+        -- 2. Clean numeric fields
+        replace(replace(p.insurance_paid_amount, '$', ''), ',', '')::numeric AS int_insurance_paid_amount,
+        replace(replace(p.patient_paid_amount_w_copays, '$', ''), ',', '')::numeric AS int_patient_paid_amount,
+        replace(replace(p.charge_balance_due_ins, '$', ''), ',', '')::numeric AS int_charge_balance_due_ins,
+        replace(replace(p.charge_balance_due_pat, '$', ''), ',', '')::numeric AS int_charge_balance_due_pat,
+        replace(replace(p.charge_balance_at_collections, '$', ''), ',', '')::numeric AS int_charge_balance_at_collections,
+
+        -- 3. Total Payment Received
+        (
+            COALESCE(replace(replace(p.insurance_paid_amount, '$', ''), ',', '')::numeric, 0) +
+            COALESCE(replace(replace(p.patient_paid_amount_w_copays, '$', ''), ',', '')::numeric, 0)
+        ) AS total_payment_received
+
+    FROM pdr3_calculator p
+
+    --
+    WHERE
+        -- last 12 months based on payment_entered
+        p.payment_entered >= CURRENT_DATE - INTERVAL '12 months'
+
+        -- exclude null/blank practice name
+        AND p.practice_name IS NOT NULL
+        AND TRIM(p.practice_name) <> ''
+
+        -- exclude null/blank credit payer
+        AND p.credit_payer_name IS NOT NULL
+        AND TRIM(p.credit_payer_name) <> ''
+),
+
+enriched AS (
+    SELECT
+        b.*,
+
+        -- 4. Level of Care
+        COALESCE(loc1.level_of_care, loc2.level_of_care) AS loc,
+
+        -- 5. Payer Class
+        pnc.payer_code AS payer_class,
+
+        -- 6. Status
+        CASE
+            WHEN b.int_charge_balance_due_ins > 0 THEN 'DO NOT INCLUDE'
+            ELSE 'INCLUDE'
+        END AS status
+
+    FROM base b
+    LEFT JOIN dw_combined.loc_crosswalk loc1
+        ON loc1.rev_code::text = b.charge_rev_code::text
+    LEFT JOIN dw_combined.loc_crosswalk loc2
+        ON loc2.rev_code::text = b.charge_cpt_code
+    LEFT JOIN dw_combined.payer_name_crosswalk pnc
+        ON pnc.payer_name = b.credit_payer_name
+)
+
+SELECT
+    customer_account,
+    instance_key,
+    practice_name,
+    location_code,
+    charge_cpt_code,
+    charge_rev_code,
+    loc,
+    charge_amount,
+    payment_allowed_amount,
+    primary_group_number,
+    primary_member_id,
+    credit_payer_name,
+    payer_class,
+    insurance_paid_amount,
+    patient_paid_amount_w_copays,
+    total_payment_received,
+    payment_received,
+    payment_entered,
+    charge_from_date,
+    charge_to_date,
+    primary_ins_zip,
+    primary_ins_city,
+    primary_ins_state,
+    primary_ins_addr_1,
+    patient_zip,
+    patient_city,
+    patient_state,
+    patient_address_1,
+    charge_balance_due_ins,
+    status,
+    charge_balance_due_pat,
+    charge_balance_at_collections,
+
+    -- Unique ID
+    CONCAT(location_code, payer_class, loc) AS unique_id,
+
+    created_at
+
+FROM enriched;
