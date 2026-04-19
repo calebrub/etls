@@ -39,7 +39,7 @@ INSTANCES = {
             {"report_id": "10066805", "filter_id": "10141935", "name": "rcm_productivity"},
             {"report_id": "10078520", "filter_id": "10141934", "name": "user_time_spread"},
             {"report_id": "10078521", "filter_id": "10141933", "name": "write_off_trend"},
-            {"report_id": "10078522", "filter_id": "10141931", "name": "pdr3_calculator"},
+            {"report_id": "10078522", "filter_id": "10144452", "name": "pdr3_calculator"},
             {"report_id": "10078523", "filter_id": "10141932", "name": "rev_rec_charges"},
             {"report_id": "10078524", "filter_id": "10141937", "name": "rev_rec_payments"}
         ],
@@ -56,7 +56,11 @@ INSTANCES = {
             '10034661',
             '10034812',
             '10034187',
-            '10032876',    # '10031999', Billing Service Account, No Data
+            '10032876',
+            '10035136',
+            '10035138',
+            '10035139',
+            # '10031999', Billing Service Account, No Data
         ],
 
         'report_configs': [

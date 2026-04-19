@@ -1,4 +1,5 @@
-CREATE OR REPLACE VIEW gross_billing_view AS
+DROP MATERIALIZED VIEW IF EXISTS gross_billing_view;
+CREATE MATERIALIZED VIEW gross_billing_view AS
 WITH gross_billing_cte AS (
     SELECT
         gb.customer_account::varchar AS customer_account,
@@ -23,7 +24,7 @@ WITH gross_billing_cte AS (
         gb.charge_current_payer_name,
         gb.claim_status,
         gb.charge_entered_date::date AS date_charge_entered_date,
-        CURRENT_DATE - gb.charge_entered_date::date AS days_on_hold,
+        (NOW() AT TIME ZONE 'MST')::date - gb.charge_entered_date::date AS days_on_hold,
         gb.claim_first_billed_date::date - gb.charge_entered_date::date AS charge_lag,
         CASE
             WHEN gb.claim_first_billed_date IS NOT NULL THEN 'Billed'
@@ -104,9 +105,15 @@ LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
 LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
 LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = gross_billing_cte.charge_primary_payer_name;
 
+CREATE INDEX IF NOT EXISTS idx_gross_billing_account ON gross_billing_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_gross_billing_entered_date ON gross_billing_view(charge_entered_date);
+CREATE INDEX IF NOT EXISTS idx_gross_billing_billed_date ON gross_billing_view(claim_first_billed_date);
+CREATE INDEX IF NOT EXISTS idx_gross_billing_instance_key ON gross_billing_view(instance_key);
+
 ----
 
-CREATE OR REPLACE VIEW payment_trends_view
+DROP MATERIALIZED VIEW IF EXISTS payment_trends_view;
+CREATE MATERIALIZED VIEW payment_trends_view
             (customer_account, facility_name, office_name, practice_name, charge_entered_date, charge_from_date,
              charge_to_date, patient_full_name, payment_source, payment_allowed_amount, charge_patient_id, charge_id,
              charge_rev_code, charge_cpt_code, type_of_bill, charge_claim_id, payer_name, primary_payer_member_id,
@@ -139,7 +146,7 @@ SELECT
     pt.charge_primary_payer_name AS payer_name,
     pt.primary_payer_member_id,
     pt.charge_amount,
-    pt.insurance_paid_amount,
+    replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', '')::numeric AS insurance_paid_amount,
     pt.payment_total_paid,
     pt.payment_total_applied,
     pt.charge_insurance_adjustments,
@@ -182,9 +189,15 @@ LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = ltrim(split_part(regexp_replace(
 LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = ltrim(split_part(regexp_replace(pt.charge_cpt_code, '\.0$', ''), ' ', 1), '0')
 LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = pt.charge_primary_payer_name;
 
+CREATE INDEX IF NOT EXISTS idx_payment_trends_account ON payment_trends_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_payment_trends_received_date ON payment_trends_view(payment_received);
+CREATE INDEX IF NOT EXISTS idx_payment_trends_entered_date ON payment_trends_view(charge_entered_date);
+CREATE INDEX IF NOT EXISTS idx_payment_trends_instance_key ON payment_trends_view(instance_key);
+
 ----
 
-CREATE OR REPLACE VIEW charges_on_hold_view AS
+DROP MATERIALIZED VIEW IF EXISTS charges_on_hold_view;
+CREATE MATERIALIZED VIEW charges_on_hold_view AS
 WITH charges_on_hold_cte AS (
     SELECT
         coh.customer_account::varchar AS customer_account,
@@ -212,7 +225,7 @@ WITH charges_on_hold_cte AS (
         ltrim(split_part(regexp_replace(coh.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         -- derived fields
         coh.charge_entered_date::date AS date_charge_entered,
-        CURRENT_DATE - coh.charge_entered_date::date AS days_on_hold,
+        (NOW() AT TIME ZONE 'MST')::date - coh.charge_entered_date::date AS days_on_hold,
         replace(replace(coh.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
         coh.charge_primary_payer_name
     FROM charges_on_hold coh
@@ -261,9 +274,14 @@ LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
 LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
 LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = charge_primary_payer_name;
 
+CREATE INDEX IF NOT EXISTS idx_charges_on_hold_account ON charges_on_hold_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_charges_on_hold_date ON charges_on_hold_view(charge_entered_date);
+CREATE INDEX IF NOT EXISTS idx_charges_on_hold_instance_key ON charges_on_hold_view(instance_key);
+
 ----
 
-CREATE OR REPLACE VIEW ar_aging_view AS
+DROP MATERIALIZED VIEW IF EXISTS ar_aging_view;
+CREATE MATERIALIZED VIEW ar_aging_view AS
 WITH ar_aging_cte AS (
     SELECT
         aa.customer_account,
@@ -311,7 +329,7 @@ WITH ar_aging_cte AS (
         aa.patient_statements_printed::numeric AS int_patient_statements_printed,
 
         -- Lifecycle calculations
-        CURRENT_DATE - aa.charge_entered_date::date AS days_on_hold,
+        (NOW() AT TIME ZONE 'MST')::date - aa.charge_entered_date::date AS days_on_hold,
         aa.claim_first_billed_date::date - aa.charge_entered_date::date AS charge_lag,
 
         CASE
@@ -385,7 +403,12 @@ FROM ar_aging_cte ac
          LEFT JOIN payer_name_crosswalk pc
                    ON pc.payer_name::text = ac.charge_primary_payer_name;
 
-CREATE OR REPLACE VIEW pdr3_calculator_view AS
+CREATE INDEX IF NOT EXISTS idx_ar_aging_account ON ar_aging_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_ar_aging_instance_key ON ar_aging_view(instance_key);
+
+------------------------
+DROP MATERIALIZED VIEW IF EXISTS pdr3_calculator_view CASCADE;
+CREATE MATERIALIZED VIEW pdr3_calculator_view AS
 WITH base AS (
     SELECT
         p.*,
@@ -411,7 +434,9 @@ WITH base AS (
     --
     WHERE
         -- last 12 months based on payment_entered
-        p.payment_entered >= CURRENT_DATE - INTERVAL '12 months'
+--        p.payment_entered >= (NOW() AT TIME ZONE 'MST')::date - INTERVAL '12 months'
+--         p.payment_entered >= '2026-03-08'::date - INTERVAL '12 months'
+        p.payment_entered between '2025-04-01' and '2026-03-31'
 
         -- exclude null/blank practice name
         AND p.practice_name IS NOT NULL
@@ -450,6 +475,7 @@ enriched AS (
 SELECT
     customer_account,
     instance_key,
+    facility_name,
     practice_name,
     location_code,
     charge_cpt_code,
@@ -461,7 +487,7 @@ SELECT
     primary_member_id,
     credit_payer_name,
     payer_class,
-    insurance_paid_amount,
+    replace(replace(insurance_paid_amount::text, '$', ''), ',', '')::numeric as insurance_paid_amount,
     patient_paid_amount_w_copays,
     total_payment_received,
     payment_received,
@@ -482,8 +508,203 @@ SELECT
     charge_balance_at_collections,
 
     -- Unique ID
-    CONCAT(location_code, payer_class, loc) AS unique_id,
+    CONCAT(
+        REGEXP_REPLACE(location_code, '\s+', '', 'g'),
+        REGEXP_REPLACE(payer_class, '\s+', '', 'g'),
+        REGEXP_REPLACE(loc, '\s+', '', 'g')
+         ) AS unique_id,
 
     created_at
 
 FROM enriched;
+
+CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_account ON pdr3_calculator_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_entered ON pdr3_calculator_view(payment_entered);
+CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_instance_key ON pdr3_calculator_view(instance_key);
+
+
+DROP MATERIALIZED VIEW IF EXISTS rev_rec_payments_view;
+DROP MATERIALIZED VIEW IF EXISTS rev_rec_charges_view;
+DROP MATERIALIZED VIEW IF EXISTS pdr3_global_rate_card_view;
+CREATE MATERIALIZED VIEW pdr3_global_rate_card_view AS
+SELECT
+    p.practice_name,
+    p.facility_name,
+    p.instance_key,
+    p.location_code,
+    p.loc,
+    p.payer_class,
+    p.unique_id,
+
+    -- rate calculation
+    ROUND(AVG(p.total_payment_received), 2) AS revenue_recognized,
+
+    -- optional: label the period (recommended)
+    CONCAT('Q', EXTRACT(QUARTER FROM ('2026-03-31'::date)), ' ', EXTRACT(YEAR FROM ('2026-03-31'::date))) AS rate_period,
+
+    NOW() AT TIME ZONE 'MST' AS rate_calculated_at
+
+FROM pdr3_calculator_view p
+
+-- only include usable rows (important)
+WHERE p.status = 'INCLUDE' AND upper(p.charge_rev_code) NOT IN ('INT', 'INTEREST',  'INTCHRG')
+
+GROUP BY
+    p.practice_name,
+    p.instance_key,
+    p.location_code,
+    p.loc,
+    p.payer_class,
+    p.unique_id, p.facility_name;
+
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_unique_id ON pdr3_global_rate_card_view(unique_id);
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_unique_id ON pdr3_global_rate_card_view(practice_name) ;
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_location ON pdr3_global_rate_card_view(location_code);
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_payer_class ON pdr3_global_rate_card_view(payer_class);
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_loc ON pdr3_global_rate_card_view(loc);
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_instance_key ON pdr3_global_rate_card_view(instance_key);
+
+----
+
+CREATE MATERIALIZED VIEW rev_rec_charges_view AS
+WITH rev_rec_charges_cte AS (
+    SELECT
+        rrc.customer_account::varchar AS customer_account,
+        rrc.instance_key,
+        rrc.practice_name AS office_name,
+        rrc.practice_name AS facility_name,
+        rrc.practice_name,
+        rrc.charge_primary_payer_name,
+        rrc.charge_primary_payer_id::varchar AS charge_primary_payer_id,
+        rrc.claim_primary_payer_type,
+        rrc.charge_secondary_payer_name,
+        rrc.claim_type,
+        rrc.charge_patient_id::varchar AS charge_patient_id,
+        rrc.charge_id::varchar AS charge_id,
+        rrc.claim_id::varchar AS claim_id,
+        rrc.patient_full_name,
+        rrc.primary_payer_member_id,
+        rrc.charge_from_date,
+        rrc.charge_to_date,
+        rrc.claim_first_billed_date,
+        rrc.times_billed,
+        rrc.admission_date,
+        rrc.claim_admit_code,
+        rrc.charge_cpt_code,
+        rrc.charge_rev_code,
+        rrc.charge_units_sum::varchar AS charge_units_sum,
+        rrc.type_of_bill::varchar AS type_of_bill,
+        rrc.claim_status,
+        rrc.charge_amount,
+        rrc.primary_group,
+        rrc.claim_primary_member_id,
+        split_part(rrc.practice_name, ' ', 1) AS location_code,
+        rrc.created_at,
+        -- cleaned codes for LOC lookup
+        ltrim(split_part(regexp_replace(rrc.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
+        ltrim(split_part(regexp_replace(rrc.charge_cpt_code::text, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
+        replace(replace(rrc.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
+        to_char(rrc.claim_first_billed_date::date::timestamp with time zone, 'day') AS claim_first_billed_day,
+        'Week' || to_char(rrc.claim_first_billed_date::date::timestamp with time zone, 'IW') AS claim_first_billed_week,
+        to_char(rrc.claim_first_billed_date::date::timestamp with time zone, 'Month') AS claim_first_billed_month,
+        to_char(rrc.claim_first_billed_date::date::timestamp with time zone, 'YYYY') AS claim_first_billed_year
+    FROM rev_rec_charges rrc
+),
+enriched AS (
+    SELECT
+        r.*,
+        coalesce(loc1.level_of_care, loc2.level_of_care) AS loc,
+        pnc.payer_code AS payer_class
+    FROM rev_rec_charges_cte r
+    LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
+    LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
+    LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = r.charge_primary_payer_name
+),
+unique_enriched AS
+         (SELECT *,
+                 -- Unique ID
+                 CONCAT(
+                         REGEXP_REPLACE(location_code, '\s+', '', 'g'),
+                         REGEXP_REPLACE(payer_class, '\s+', '', 'g'),
+                         REGEXP_REPLACE(loc, '\s+', '', 'g')
+                 ) AS unique_id
+          FROM enriched)
+SELECT u_e.*,
+       p3grcv.revenue_recognized
+FROM unique_enriched u_e
+JOIN pdr3_global_rate_card_view p3grcv ON p3grcv.unique_id = u_e.unique_id;
+
+
+CREATE INDEX IF NOT EXISTS idx_rev_rec_charges_account ON rev_rec_charges_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_rev_rec_charges_instance_key ON rev_rec_charges_view(instance_key);
+CREATE INDEX IF NOT EXISTS idx_rev_rec_charges_billed_date ON rev_rec_charges_view(claim_first_billed_date);
+CREATE INDEX IF NOT EXISTS idx_rev_rec_charges_unique_id ON rev_rec_charges_view(unique_id);
+
+----
+
+
+CREATE MATERIALIZED VIEW rev_rec_payments_view AS
+WITH rev_rec_payments_cte AS (
+    SELECT
+        rrp.customer_account::varchar AS customer_account,
+        rrp.instance_key,
+        rrp.practice_name AS office_name,
+        rrp.practice_name AS facility_name,
+        rrp.practice_name,
+        rrp.charge_cpt_code,
+        rrp.charge_rev_code::text AS charge_rev_code,
+        rrp.charge_primary_payer_name,
+        rrp.charge_id::varchar AS charge_id,
+        rrp.charge_claim_id::varchar AS charge_claim_id,
+        rrp.charge_amount,
+        rrp.payment_allowed_amount,
+        rrp.primary_group_number,
+        rrp.primary_member_id,
+        rrp.credit_payer_name,
+        rrp.payment_total_paid,
+        rrp.payment_received,
+        rrp.payment_entered,
+        rrp.charge_from_date,
+        rrp.charge_to_date,
+        rrp.created_at,
+        split_part(rrp.practice_name, ' ', 1) AS location_code,
+        -- cleaned codes for LOC lookup
+        ltrim(split_part(regexp_replace(rrp.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
+        ltrim(split_part(regexp_replace(rrp.charge_cpt_code::text, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
+        replace(replace(rrp.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
+        replace(replace(rrp.payment_allowed_amount::text, '$', ''), ',', '')::numeric AS int_payment_allowed_amount,
+        replace(replace(rrp.payment_total_paid::text, '$', ''), ',', '')::numeric AS int_payment_total_paid,
+        to_char(rrp.payment_received::date::timestamp with time zone, 'day') AS payment_received_day,
+        'Week' || to_char(rrp.payment_received::date::timestamp with time zone, 'IW') AS payment_received_week,
+        to_char(rrp.payment_received::date::timestamp with time zone, 'Month') AS payment_received_month,
+        to_char(rrp.payment_received::date::timestamp with time zone, 'YYYY') AS payment_received_year
+    FROM rev_rec_payments rrp
+),
+enriched AS (
+    SELECT
+        r.*,
+        coalesce(loc1.level_of_care, loc2.level_of_care) AS loc,
+        pnc.payer_code AS payer_class
+    FROM rev_rec_payments_cte r
+    LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
+    LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
+    LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = r.charge_primary_payer_name
+),
+unique_enriched AS
+         (SELECT *,
+                 -- Unique ID
+                 CONCAT(
+                         REGEXP_REPLACE(location_code, '\s+', '', 'g'),
+                         REGEXP_REPLACE(payer_class, '\s+', '', 'g'),
+                         REGEXP_REPLACE(loc, '\s+', '', 'g')
+                 ) AS unique_id
+          FROM enriched)
+SELECT u_e.*,
+       p3grcv.revenue_recognized
+FROM unique_enriched u_e
+JOIN pdr3_global_rate_card_view p3grcv ON p3grcv.unique_id = u_e.unique_id;
+
+CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_account ON rev_rec_payments_view(customer_account);
+CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_instance_key ON rev_rec_payments_view(instance_key);
+CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_received_date ON rev_rec_payments_view(payment_received);
+CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_unique_id ON rev_rec_payments_view(unique_id);
