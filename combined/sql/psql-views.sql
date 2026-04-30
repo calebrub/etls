@@ -633,7 +633,9 @@ SELECT
         regexp_replace(split_part(b.practice_name, ' ', 1), '\s+', '', 'g'),
         regexp_replace(pnc.payer_code,                                        '\s+', '', 'g'),
         regexp_replace(coalesce(loc1.level_of_care, loc2.level_of_care),     '\s+', '', 'g')
-    )                                                                                            AS unique_id
+    )                                                                                            AS unique_id,
+    -- Absolute Unique ID: charge_id + claim_id + practice_name
+    CONCAT(b.charge_id, b.claim_id, b.practice_name)                                            AS abs_unique_id
 FROM base b
 LEFT JOIN loc_crosswalk        loc1 ON loc1.rev_code  = b.clean_rev_code
 LEFT JOIN loc_crosswalk        loc2 ON loc2.rev_code  = b.clean_cpt_code
@@ -715,7 +717,9 @@ unique_enriched AS
                          REGEXP_REPLACE(location_code, '\s+', '', 'g'),
                          REGEXP_REPLACE(payer_class, '\s+', '', 'g'),
                          REGEXP_REPLACE(loc, '\s+', '', 'g')
-                 ) AS unique_id
+                 ) AS unique_id,
+                 -- Absolute Unique ID: charge_id + charge_claim_id + practice_name
+                 CONCAT(charge_id, charge_claim_id, practice_name) AS abs_unique_id
           FROM enriched)
 SELECT u_e.*,
        p3grcv.revenue_recognized
