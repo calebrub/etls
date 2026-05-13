@@ -278,6 +278,9 @@ CREATE INDEX IF NOT EXISTS idx_charges_on_hold_account ON charges_on_hold_view(c
 CREATE INDEX IF NOT EXISTS idx_charges_on_hold_date ON charges_on_hold_view(charge_entered_date);
 CREATE INDEX IF NOT EXISTS idx_charges_on_hold_instance_key ON charges_on_hold_view(instance_key);
 
+-- Cluster the data physically by entered date to speed up chronological extracts
+CLUSTER gross_billing_view USING idx_gross_billing_entered_date;
+
 ----
 
 DROP MATERIALIZED VIEW IF EXISTS ar_aging_view;
@@ -521,6 +524,8 @@ FROM enriched;
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_account ON pdr3_calculator_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_entered ON pdr3_calculator_view(payment_entered);
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_instance_key ON pdr3_calculator_view(instance_key);
+-- Index the Unique ID used for Tableau relationships
+CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_unique_id ON pdr3_calculator_view(unique_id);
 
 
 DROP MATERIALIZED VIEW IF EXISTS rev_rec_payments_view;
@@ -556,11 +561,7 @@ SELECT
 
 FROM pdr3_calculator_view p
 JOIN facility_rates fr ON
-            unique_id =    CONCAT(
-                         REGEXP_REPLACE( split_part(fr.practice_name, ' ', 1), '\s+', '', 'g'),
-                         REGEXP_REPLACE(payer_class, '\s+', '', 'g'),
-                         REGEXP_REPLACE(fr.loc, '\s+', '', 'g')
-                 )
+            p.unique_id = fr.unique_id
 -- only include usable rows (important)
 WHERE p.status = 'INCLUDE' AND upper(p.charge_rev_code) NOT IN ('INT', 'INTEREST',  'INTCHRG')
 
@@ -573,16 +574,14 @@ GROUP BY
     p.unique_id, p.facility_name, fr.inn_oon, fr.rate;
 
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_unique_id ON pdr3_global_rate_card_view(unique_id);
-CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_unique_id ON pdr3_global_rate_card_view(practice_name) ;
+CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_practice ON pdr3_global_rate_card_view(practice_name) ;
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_location ON pdr3_global_rate_card_view(location_code);
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_payer_class ON pdr3_global_rate_card_view(payer_class);
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_loc ON pdr3_global_rate_card_view(loc);
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_instance_key ON pdr3_global_rate_card_view(instance_key);
 
 ----
-
--- Step 2: Create the base materialized view
-CREATE MATERIALIZED VIEW rev_rec_charges_base_view AS
+CREATE MATERIALIZED VIEW rev_rec_charges_view AS
 WITH base AS (
     SELECT
         rrc.customer_account::varchar                                                                  AS customer_account,
@@ -624,41 +623,36 @@ WITH base AS (
         to_char(rrc.claim_first_billed_date::date::timestamptz, 'Month')                             AS claim_first_billed_month,
         to_char(rrc.claim_first_billed_date::date::timestamptz, 'YYYY')                              AS claim_first_billed_year
     FROM rev_rec_charges rrc
+),
+enriched AS (
+    SELECT
+        b.*,
+        coalesce(loc1.level_of_care, loc2.level_of_care)                                             AS loc,
+        pnc.payer_code                                                                               AS payer_class,
+        CONCAT(
+            regexp_replace(split_part(b.practice_name, ' ', 1), '\s+', '', 'g'),
+            regexp_replace(pnc.payer_code,                                        '\s+', '', 'g'),
+            regexp_replace(coalesce(loc1.level_of_care, loc2.level_of_care),     '\s+', '', 'g')
+        )                                                                                            AS unique_id,
+        CONCAT(b.charge_id, b.claim_id, b.practice_name)                                            AS abs_unique_id
+    FROM base b
+    LEFT JOIN loc_crosswalk        loc1 ON loc1.rev_code  = b.clean_rev_code
+    LEFT JOIN loc_crosswalk        loc2 ON loc2.rev_code  = b.clean_cpt_code
+    LEFT JOIN payer_name_crosswalk pnc  ON pnc.payer_name = b.charge_primary_payer_name
 )
-SELECT
-    b.*,
-    coalesce(loc1.level_of_care, loc2.level_of_care)                                             AS loc,
-    pnc.payer_code                                                                               AS payer_class,
-    CONCAT(
-        regexp_replace(split_part(b.practice_name, ' ', 1), '\s+', '', 'g'),
-        regexp_replace(pnc.payer_code,                                        '\s+', '', 'g'),
-        regexp_replace(coalesce(loc1.level_of_care, loc2.level_of_care),     '\s+', '', 'g')
-    )                                                                                            AS unique_id,
-    -- Absolute Unique ID: charge_id + claim_id + practice_name
-    CONCAT(b.charge_id, b.claim_id, b.practice_name)                                            AS abs_unique_id
-FROM base b
-LEFT JOIN loc_crosswalk        loc1 ON loc1.rev_code  = b.clean_rev_code
-LEFT JOIN loc_crosswalk        loc2 ON loc2.rev_code  = b.clean_cpt_code
-LEFT JOIN payer_name_crosswalk pnc  ON pnc.payer_name = b.charge_primary_payer_name;
-
--- Step 3: Index to speed up the final join
-CREATE INDEX ON rev_rec_charges_base_view (unique_id);
-
--- Step 4: Create the final materialized view
-CREATE VIEW rev_rec_charges_view AS
 SELECT
     e.*,
     fr.rate,
     fr.inn_oon,
     p3.revenue_recognized
-FROM rev_rec_charges_base_view e
+FROM enriched e
 JOIN facility_rates fr
-    ON e.unique_id = CONCAT(
-        regexp_replace(split_part(fr.practice_name, ' ', 1), '\s+', '', 'g'),
-        regexp_replace(e.payer_class,                         '\s+', '', 'g'),
-        regexp_replace(fr.loc,                               '\s+', '', 'g')
-    )
+    ON e.unique_id = fr.unique_id
 JOIN pdr3_global_rate_card_view p3 ON p3.unique_id = e.unique_id;
+
+-- Index on the materialized view for fast lookups
+CREATE INDEX ON rev_rec_charges_view (unique_id);
+CREATE INDEX ON rev_rec_charges_view (abs_unique_id);
 
 ----
 
