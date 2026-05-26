@@ -30,10 +30,10 @@ WITH gross_billing_cte AS (
             WHEN gb.claim_first_billed_date IS NOT NULL THEN 'Billed'
             ELSE 'Not Billed'
         END AS billed_or_not_billed,
-        to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'day') AS claim_first_billed_day,
-        'Week' || to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'IW') AS claim_first_billed_week,
-        to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'Month') AS claim_first_billed_month,
-        to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'YYYY') AS claim_first_billed_year,
+        to_char(gb.claim_first_billed_date::date::timestamptz, 'day') AS claim_first_billed_day,
+        'Week' || to_char(gb.claim_first_billed_date::date::timestamptz, 'IW') AS claim_first_billed_week,
+        to_char(gb.claim_first_billed_date::date::timestamptz, 'Month') AS claim_first_billed_month,
+        to_char(gb.claim_first_billed_date::date::timestamptz, 'YYYY') AS claim_first_billed_year,
         -- cleaned codes for LOC lookup
         ltrim(split_part(regexp_replace(gb.charge_rev_code, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(gb.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
@@ -49,40 +49,26 @@ WITH gross_billing_cte AS (
             ELSE replace(replace(gb.charge_amount::text, '$', ''), ',', '')::numeric
         END AS int_charge_amount_cln
     FROM gross_billing gb
+),
+enriched AS (
+    SELECT
+        g.*,
+        coalesce(loc1.level_of_care, loc2.level_of_care) AS loc,
+        pnc.payer_code AS payer_class,
+        split_part(g.practice_name, ' ', 1) AS location_code,
+        CONCAT(
+            regexp_replace(split_part(g.practice_name, ' ', 1), '\s+', '', 'g'),
+            regexp_replace(pnc.payer_code, '\s+', '', 'g'),
+            regexp_replace(coalesce(loc1.level_of_care, loc2.level_of_care), '\s+', '', 'g')
+        ) AS unique_id
+    FROM gross_billing_cte g
+    LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = g.clean_rev_code
+    LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = g.clean_cpt_code
+    LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = g.charge_primary_payer_name
 )
 SELECT
-    customer_account,
-    office_name,
-    facility_name,
-    practice_name,
-    charge_primary_payer_name,
-    charge_patient_id,
-    charge_id,
-    charge_claim_id,
-    patient_full_name,
-    primary_payer_member_id,
-    charge_from_date,
-    charge_to_date,
-    charge_entered_date,
-    type_of_bill,
-    claim_first_billed_date,
-    charge_cpt_code,
-    charge_units_sum,
-    charge_amount,
-    charge_rev_code,
-    charge_current_payer_name,
-    claim_status,
-    date_charge_entered_date,
-    days_on_hold,
-    charge_lag,
-    billed_or_not_billed,
-    claim_first_billed_day,
-    claim_first_billed_week,
-    claim_first_billed_month,
-    claim_first_billed_year,
-    coalesce(loc1.level_of_care, loc2.level_of_care) AS loc,
-    int_charge_amount,
-    first_billed_week_date,
+    e.*,
+    fr.inn_oon,
     CASE
         WHEN days_on_hold <= 5 THEN '0-5 days'
         WHEN days_on_hold > 5 AND days_on_hold <= 10 THEN '6-10 days'
@@ -98,12 +84,9 @@ SELECT
     concat(claim_first_billed_month, '', claim_first_billed_year) AS claim_first_billed_ym,
     instance_key,
     claim_first_billed_date_cln,
-    int_charge_amount_cln,
-    pnc.payer_code AS payer_class
-FROM gross_billing_cte
-LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
-LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
-LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = gross_billing_cte.charge_primary_payer_name;
+    int_charge_amount_cln
+FROM enriched e
+LEFT JOIN facility_rates fr ON e.unique_id = fr.unique_id;
 
 CREATE INDEX IF NOT EXISTS idx_gross_billing_account ON gross_billing_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_gross_billing_entered_date ON gross_billing_view(charge_entered_date);
@@ -715,10 +698,8 @@ unique_enriched AS
                  -- Absolute Unique ID: charge_id + charge_claim_id + practice_name
                  CONCAT(charge_id, charge_claim_id, practice_name) AS abs_unique_id
           FROM enriched)
-SELECT u_e.*,
-       p3grcv.revenue_recognized
-FROM unique_enriched u_e
-JOIN pdr3_global_rate_card_view p3grcv ON p3grcv.unique_id = u_e.unique_id;
+SELECT *
+FROM unique_enriched;
 
 CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_account ON rev_rec_payments_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_instance_key ON rev_rec_payments_view(instance_key);
