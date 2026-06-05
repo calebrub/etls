@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "fileSelector": "/home/azureuser/etls/combined/csv_files/run_summaries/latest_summary.csv",
+        "fileSelector": "/home/azureuser/etls/combined/csv_files/run_summaries/latest_identifier_summary.csv",
         "options": {}
       },
       "type": "n8n-nodes-base.readWriteFile",
@@ -100,6 +100,62 @@
       ],
       "id": "8248e28a-c798-44f1-bb0b-bf09f898c291",
       "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/azureuser/etls/combined/csv_files/fetch_summaries/latest_fetch_summary.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        672
+      ],
+      "id": "2d1ef1a3-a001-447a-8f81-229bbbe536c4",
+      "name": "Read Fetch Summary File"
+    },
+    {
+      "parameters": {
+        "fileFormat": "csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        672
+      ],
+      "id": "5f1bc731-97ea-46b6-a83d-6b5860d5bfa4",
+      "name": "Parse Fetch CSV to Table"
+    },
+    {
+      "parameters": {
+        "jsCode": "const table1 = $('Parse CSV to Table').all();\nconst table2 = $('Parse Fetch CSV to Table').all();\n\nconst map2 = {};\nfor (const item of table2) {\n  const data = item.json;\n  const key = `${data.instance_key}_${data.customer_account}_${data.report_name}`.toLowerCase();\n  map2[key] = data;\n}\n\nconst joined = [];\nfor (const item of table1) {\n  const data = item.json;\n  const key = `${data.instance_key}_${data.customer_account}_${data.report_name}`.toLowerCase();\n  const match = map2[key] || {};\n  \n  joined.push({\n    json: {\n      instance_key: data.instance_key,\n      customer_account: data.customer_account,\n      customer_name: data.customer_name || match.customer_name,\n      report_name: data.report_name,\n      report_id: data.report_id || match.report_id,\n      run_http_status: data.http_status,\n      run_api_status: data.api_status,\n      identifier: data.identifier,\n      run_status_message: data.status_message,\n      run_retries: data.retries,\n      db_updated: data.db_updated,\n      fetch_http_status: match.http_status,\n      fetch_api_status: match.api_status,\n      fetch_status_message: match.status_message,\n      fetch_retries: match.retries,\n      rows_fetched: match.rows_fetched,\n      file_written: match.file_written\n    }\n  });\n}\n\nreturn joined;"
+      },
+      "id": "e458e0a3-a9f8-410a-b286-90516b328a9b",
+      "name": "Join Summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "csv",
+        "options": {}
+      },
+      "id": "7662c12a-3642-4f3d-a51f-d513bf366a7b",
+      "name": "Convert to Joined CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        672
+      ]
     }
   ],
   "pinData": {},
@@ -164,6 +220,50 @@
         [
           {
             "node": "Generate Identifiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch and Load Reports": {
+      "main": [
+        [
+          {
+            "node": "Read Fetch Summary File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Fetch Summary File": {
+      "main": [
+        [
+          {
+            "node": "Parse Fetch CSV to Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Fetch CSV to Table": {
+      "main": [
+        [
+          {
+            "node": "Join Summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join Summaries": {
+      "main": [
+        [
+          {
+            "node": "Convert to Joined CSV",
             "type": "main",
             "index": 0
           }
