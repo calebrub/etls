@@ -29,6 +29,13 @@ INSTANCES = {
             '10023994',
             '10026559',  # '10023851', Rebel Removed
         ],
+        'account_names': {
+            '10028395': 'CK FAMILY THERAPY',
+            '10026936': 'EDEN BY ENHANCE',
+            '10026716': 'EMBRACE TREATMENT, LLC',
+            '10023994': 'ENHANCE HEALTH GROUP, LLC',
+            '10026559': '10026559',
+        },
         'report_configs': [
             {"report_id": "10078378", "filter_id": "10141925", "name": "ar_aging"},
             {"report_id": "10078486", "filter_id": "10141929", "name": "gross_billing"},
@@ -62,6 +69,19 @@ INSTANCES = {
             '10035139',
             # '10031999', Billing Service Account, No Data
         ],
+        'account_names': {
+            '10031998': '1 SOLUTION WELLNESS',
+            '10032271': 'AMITY SAN DIEGO',
+            '10032272': 'NORTHRIDGE ADDICTION TREATMENT CENTERS',
+            '10034661': 'PASSAGE TO RECOVERY',
+            '10034812': 'SAN DIEGO WELLNESS',
+            '10034187': 'THE TRINITY WELLNESS GROUP',
+            '10032876': 'AMITY PALM BEACH',
+            '10035136': 'LIAH WELLNESS CENTER LLC',
+            '10035138': 'LIAH WELLNESS SERVICES PLLC',
+            '10035139': 'THE BRIDGES OF HOUSTON LLC',
+            '10031999': 'BILLING SERVICE ACCOUNT',
+        },
 
         'report_configs': [
             {"report_id": "10062054", "filter_id": "10137065", "name": "ar_aging"},

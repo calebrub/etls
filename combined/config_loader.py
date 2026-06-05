@@ -116,6 +116,7 @@ class ConfigLoader:
                     'username': username,
                     'password': password,
                     'accounts': accounts,
+                    'account_names': raw.get('account_names', {}),
                     'report_configs': raw.get('report_configs', [])
                 }
 
@@ -153,6 +154,7 @@ class ConfigLoader:
                     'accounts': ast.literal_eval(
                         self.config.get(section, 'accounts')
                     ),
+                    'account_names': {},
                     # No per-instance reports in INI mode; fallback to global REPORTS
                     'report_configs': []
                 }
@@ -178,6 +180,7 @@ class ConfigLoader:
                 'accounts': ast.literal_eval(
                     self.config.get('CUSTOMERS', 'accounts')
                 ),
+                'account_names': {},
                 'report_configs': []
             }
 

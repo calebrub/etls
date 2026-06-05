@@ -92,11 +92,12 @@ def handle_report_response(response_text, customer_account, report_name, instanc
         return "ERROR", None
 
 
-def record_attempt(instance_key, account, report_name, report_id, http_status, api_status, identifier, status_message, retries, db_updated, results_list, results_lock):
+def record_attempt(instance_key, account, customer_name, report_name, report_id, http_status, api_status, identifier, status_message, retries, db_updated, results_list, results_lock):
     with results_lock:
         results_list.append({
             'instance_key': instance_key,
             'customer_account': account,
+            'customer_name': customer_name,
             'report_name': report_name.upper(),
             'report_id': report_id,
             'http_status': http_status,
@@ -108,8 +109,9 @@ def record_attempt(instance_key, account, report_name, report_id, http_status, a
         })
 
 
-def generate_report_for_all_accounts(report_id, filter_id, report_name, instance_key, base_url, username, password, accounts, results_list, results_lock):
+def generate_report_for_all_accounts(report_id, filter_id, report_name, instance_key, base_url, username, password, accounts, account_names, results_list, results_lock):
     for account in accounts:
+        account_name = account_names.get(account, account)
         retries = 0
         while True:
             url = f"{base_url}/customer/{account}/reports/{report_id}/filter/{filter_id}/run"
@@ -119,7 +121,7 @@ def generate_report_for_all_accounts(report_id, filter_id, report_name, instance
             try:
                 response = requests.post(url, data=payload, headers=headers, auth=(username, password))
                 print(response.text)
-                print(f"{report_name.upper()} | {report_id} | Status: {response.status_code} | Instance: {instance_key} | Account: {account}")
+                print(f"{report_name.upper()} | {report_id} | Status: {response.status_code} | Instance: {instance_key} | Account: {account_name} ({account})")
 
                 status = "UNKNOWN"
                 identifier = "None"
@@ -142,35 +144,35 @@ def generate_report_for_all_accounts(report_id, filter_id, report_name, instance
                         pass
 
                     if result is True:
-                        print(f"{report_name} report started and DB updated for account {account} - instance {instance_key}")
+                        print(f"{report_name} report started and DB updated for account {account_name} ({account}) - instance {instance_key}")
                         db_updated = True
-                        record_attempt(instance_key, account, report_name, report_id, response.status_code, status, identifier, status_message, retries, db_updated, results_list, results_lock)
+                        record_attempt(instance_key, account, account_name, report_name, report_id, response.status_code, status, identifier, status_message, retries, db_updated, results_list, results_lock)
                         break
                     elif result == "RUNNING":
-                        print(f"Report for {account} ({instance_key}) is still running. Waiting 60 seconds before retrying...")
+                        print(f"Report for {account_name} ({account}) ({instance_key}) is still running. Waiting 60 seconds before retrying...")
                         retries += 1
                         time.sleep(60)
                         continue
                     elif result == "DUPLICATE":
-                        print(f"Duplicate report identifier {identifier} returned {account} ({instance_key}) - {report_name}. Waiting 60 seconds before retrying...")
+                        print(f"Duplicate report identifier {identifier} returned {account_name} ({account}) ({instance_key}) - {report_name}. Waiting 60 seconds before retrying...")
                         retries += 1
                         time.sleep(60)
                         continue
                     elif result == "ERROR":
-                        print(f"Skipping {report_name} for account {account} - instance {instance_key} due to error")
-                        record_attempt(instance_key, account, report_name, report_id, response.status_code, "ERROR", identifier, status_message, retries, False, results_list, results_lock)
+                        print(f"Skipping {report_name} for account {account_name} ({account}) - instance {instance_key} due to error")
+                        record_attempt(instance_key, account, account_name, report_name, report_id, response.status_code, "ERROR", identifier, status_message, retries, False, results_list, results_lock)
                         break
                     else:
-                        print(f"Failed to handle response for {report_name} - account {account} - instance {instance_key}")
-                        record_attempt(instance_key, account, report_name, report_id, response.status_code, "HANDLE_FAILED", identifier, status_message, retries, False, results_list, results_lock)
+                        print(f"Failed to handle response for {report_name} - account {account_name} ({account}) - instance {instance_key}")
+                        record_attempt(instance_key, account, account_name, report_name, report_id, response.status_code, "HANDLE_FAILED", identifier, status_message, retries, False, results_list, results_lock)
                         break
                 else:
-                    print(f"API call failed for {report_name} - account {account} - instance {instance_key} - Status: {response.status_code}")
-                    record_attempt(instance_key, account, report_name, report_id, response.status_code, f"HTTP_{response.status_code}", "None", f"API Call Failed: HTTP {response.status_code}", retries, False, results_list, results_lock)
+                    print(f"API call failed for {report_name} - account {account_name} ({account}) - instance {instance_key} - Status: {response.status_code}")
+                    record_attempt(instance_key, account, account_name, report_name, report_id, response.status_code, f"HTTP_{response.status_code}", "None", f"API Call Failed: HTTP {response.status_code}", retries, False, results_list, results_lock)
                     break
             except Exception as e:
-                print(f"Exception during report generation for {report_name} - account {account} - instance {instance_key}: {e}")
-                record_attempt(instance_key, account, report_name, report_id, 0, "EXCEPTION", "None", str(e), retries, False, results_list, results_lock)
+                print(f"Exception during report generation for {report_name} - account {account_name} ({account}) - instance {instance_key}: {e}")
+                record_attempt(instance_key, account, account_name, report_name, report_id, 0, "EXCEPTION", "None", str(e), retries, False, results_list, results_lock)
                 break
 
         time.sleep(5)
@@ -218,6 +220,7 @@ def run_all_reports(max_workers=None):
                 username=instance_config['username'],
                 password=instance_config['password'],
                 accounts=instance_config['accounts'],
+                account_names=instance_config.get('account_names', {}),
                 results_list=results_list,
                 results_lock=results_lock
             )
@@ -241,7 +244,7 @@ def run_all_reports(max_workers=None):
         latest_csv_file = os.path.join(csv_dir, "latest_identifier_summary.csv")
         
         fields = [
-            'instance_key', 'customer_account', 'report_name', 'report_id',
+            'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
             'http_status', 'api_status', 'identifier', 'status_message',
             'retries', 'db_updated'
         ]

@@ -107,7 +107,7 @@ def has_instance_key_column(schema):
     return has_column
 
 
-def fetch_report_data_for_customer(base_url, username, password, customer_id, report_id, report_name, instance_key, max_retries=100, retry_delay=60):
+def fetch_report_data_for_customer(base_url, username, password, customer_id, customer_name, report_id, report_name, instance_key, max_retries=100, retry_delay=60):
     """
     Fetches, decodes, and parses a single report result from CollaborateMD API.
     Returns (headers, list of rows, http_status, api_status, status_message, retries).
@@ -126,13 +126,13 @@ def fetch_report_data_for_customer(base_url, username, password, customer_id, re
         except requests.exceptions.RequestException as e:
             api_status = "EXCEPTION"
             status_message = str(e)
-            print(f"  → [ERROR] Request failed for {report_name} - account {customer_id}: {e}")
+            print(f"  → [ERROR] Request failed for {report_name} - account {customer_name} ({customer_id}): {e}")
             break
 
         if response.status_code != 200:
             api_status = f"HTTP_{response.status_code}"
             status_message = f"API call failed with status code {response.status_code}"
-            print(f"  → [ERROR] Received status code {response.status_code} for {report_name} - account {customer_id}")
+            print(f"  → [ERROR] Received status code {response.status_code} for {report_name} - account {customer_name} ({customer_id})")
             break
 
         try:
@@ -140,7 +140,7 @@ def fetch_report_data_for_customer(base_url, username, password, customer_id, re
         except ET.ParseError as e:
             api_status = "XML_PARSE_ERROR"
             status_message = f"Failed to parse XML response: {e}"
-            print(f"Error parsing XML response for {report_name} - account {customer_id}: {e}")
+            print(f"Error parsing XML response for {report_name} - account {customer_name} ({customer_id}): {e}")
             break
 
         # Find elements namespace-agnostically
@@ -155,14 +155,14 @@ def fetch_report_data_for_customer(base_url, username, password, customer_id, re
             api_status = status_element.text or ""
 
         if status_element is not None and status_element.text == 'REPORT RUNNING':
-            print(f"  → [RUNNING] {report_name} for account {customer_id} is still running. "
+            print(f"  → [RUNNING] {report_name} for account {customer_name} ({customer_id}) is still running. "
                   f"Waiting {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
                 continue
             else:
                 api_status = "TIMEOUT"
-                print(f"  → [TIMEOUT] {report_name} for account {customer_id} did not complete in time.")
+                print(f"  → [TIMEOUT] {report_name} for account {customer_name} ({customer_id}) did not complete in time.")
                 break
 
         if data_element is not None and data_element.text:
@@ -190,7 +190,7 @@ def fetch_report_data_for_customer(base_url, username, password, customer_id, re
             except Exception as e:
                 api_status = "ZIP_CSV_ERROR"
                 status_message = f"Failed to process zip/CSV: {e}"
-                print(f"  → [ERROR] Failed to process zip/CSV for {report_name} - account {customer_id}: {e}")
+                print(f"  → [ERROR] Failed to process zip/CSV for {report_name} - account {customer_name} ({customer_id}): {e}")
                 break
             break
         else:
@@ -198,7 +198,7 @@ def fetch_report_data_for_customer(base_url, username, password, customer_id, re
             api_status = "NO_DATA"
             status_info = f" (HTTP {http_status}, XML Status: {xml_status})"
             api_msg = f" - API Message: {status_message}" if status_message and status_message != "No response" else ""
-            print(f"  → [WARNING] No data element found in response for {report_name} - account {customer_id}.{status_info}{api_msg}")
+            print(f"  → [WARNING] No data element found in response for {report_name} - account {customer_name} ({customer_id}).{status_info}{api_msg}")
             break
 
     return None, None, http_status, api_status, status_message, retries
@@ -254,6 +254,7 @@ def fetch_reports_to_csv():
 
         # Load reports for this instance
         report_matrix = load_report_matrix(instance_key if has_instance_column else None)
+        account_names = instance_config.get('account_names', {})
 
         if not report_matrix:
             print(f"No reports found for instance {instance_key}")
@@ -271,6 +272,7 @@ def fetch_reports_to_csv():
                 tasks.append({
                     'instance_key': instance_key,
                     'customer_id': customer_id,
+                    'customer_name': account_names.get(customer_id, customer_id),
                     'report_name': report_name,
                     'report_id': report_id,
                     'base_url': base_url,
@@ -291,6 +293,7 @@ def fetch_reports_to_csv():
     def worker(task):
         instance_key = task['instance_key']
         customer_id = task['customer_id']
+        customer_name = task['customer_name']
         report_name = task['report_name']
         report_id = task['report_id']
         base_url = task['base_url']
@@ -298,7 +301,7 @@ def fetch_reports_to_csv():
         password = task['password']
 
         headers, rows, http_status, api_status, status_message, retries = fetch_report_data_for_customer(
-            base_url, username, password, customer_id, report_id, report_name, instance_key
+            base_url, username, password, customer_id, customer_name, report_id, report_name, instance_key
         )
 
         rows_fetched = len(rows) if rows else 0
@@ -308,6 +311,7 @@ def fetch_reports_to_csv():
             results_list.append({
                 'instance_key': instance_key,
                 'customer_account': customer_id,
+                'customer_name': customer_name,
                 'report_name': report_name.upper(),
                 'report_id': report_id,
                 'http_status': http_status,
@@ -356,7 +360,7 @@ def fetch_reports_to_csv():
         latest_csv_file = os.path.join(summary_dir, "latest_fetch_summary.csv")
 
         fields = [
-            'instance_key', 'customer_account', 'report_name', 'report_id',
+            'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
             'http_status', 'api_status', 'status_message',
             'retries', 'rows_fetched', 'file_written'
         ]
