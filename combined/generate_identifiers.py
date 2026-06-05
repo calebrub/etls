@@ -237,7 +237,8 @@ def run_all_reports(max_workers=None):
         csv_dir = 'csv_files/run_summaries'
         os.makedirs(csv_dir, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        csv_file = os.path.join(csv_dir, f"summary_{timestamp}.csv")
+        csv_file = os.path.join(csv_dir, f"identifier_summary_{timestamp}.csv")
+        latest_csv_file = os.path.join(csv_dir, "latest_identifier_summary.csv")
         
         fields = [
             'instance_key', 'customer_account', 'report_name', 'report_id',
@@ -253,6 +254,16 @@ def run_all_reports(max_workers=None):
             print(f"\n✓ Generated runs summary written to: {csv_file}")
         except Exception as e:
             print(f"\n✗ Failed to write run summary CSV: {e}")
+
+        try:
+            with open(latest_csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(results_list)
+            print(f"✓ Copied latest runs summary to: {latest_csv_file}")
+        except Exception as e:
+            print(f"✗ Failed to write latest summary CSV: {e}")
+
 
 
 if __name__ == "__main__":
