@@ -6,6 +6,7 @@ from datetime import date, datetime
 import time
 import concurrent.futures
 import threading
+import sys
 
 import requests
 import logging
@@ -16,7 +17,44 @@ import pandas as pd
 import re
 from sqlalchemy import create_engine, text
 import glob
+
+class TeeStream:
+    def __init__(self, filename, stream):
+        self.stream = stream
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        self.file = open(filename, 'a', encoding='utf-8')
+
+    def write(self, message):
+        self.stream.write(message)
+        self.file.write(message)
+        self.file.flush()
+
+    def flush(self):
+        self.stream.flush()
+        self.file.flush()
+
+def setup_file_logging(log_filename):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(script_dir, "logs")
+    log_path = os.path.join(log_dir, log_filename)
+    
+    # Redirect sys.stdout and sys.stderr to write to both console and file
+    sys.stdout = TeeStream(log_path, sys.stdout)
+    sys.stderr = TeeStream(log_path, sys.stderr)
+
+    # Configure root logger to write to sys.stdout (which is now redirected)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+setup_file_logging("fetch_and_load_reports.log")
+
 from config_loader import ConfigLoader
+
 
 # Load config using multi-instance aware loader
 # Prefer the new Python config if present, otherwise fall back to the old INI
