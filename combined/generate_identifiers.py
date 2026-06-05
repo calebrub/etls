@@ -1,13 +1,16 @@
 import time
 import xml.etree.ElementTree as ET
-
 import psycopg2
 import requests
-
-from config_loader import ConfigLoader
 import concurrent.futures
 import argparse
 import sys
+import os
+import csv
+import threading
+from datetime import datetime
+
+from config_loader import ConfigLoader
 
 # Load config using multi-instance aware loader
 # Prefer the new Python config if present, otherwise fall back to the old INI
@@ -89,38 +92,85 @@ def handle_report_response(response_text, customer_account, report_name, instanc
         return "ERROR", None
 
 
-def generate_report_for_all_accounts(report_id, filter_id, report_name, instance_key, base_url, username, password, accounts):
+def record_attempt(instance_key, account, report_name, report_id, http_status, api_status, identifier, status_message, retries, db_updated, results_list, results_lock):
+    with results_lock:
+        results_list.append({
+            'instance_key': instance_key,
+            'customer_account': account,
+            'report_name': report_name.upper(),
+            'report_id': report_id,
+            'http_status': http_status,
+            'api_status': api_status,
+            'identifier': str(identifier) if identifier is not None else 'None',
+            'status_message': status_message,
+            'retries': retries,
+            'db_updated': 'TRUE' if db_updated else 'FALSE'
+        })
+
+
+def generate_report_for_all_accounts(report_id, filter_id, report_name, instance_key, base_url, username, password, accounts, results_list, results_lock):
     for account in accounts:
+        retries = 0
         while True:
             url = f"{base_url}/customer/{account}/reports/{report_id}/filter/{filter_id}/run"
             payload = f"<Run><Nonce>{time.time()}</Nonce></Run>"
             headers = {"Content-Type": "application/xml"}
 
-            response = requests.post(url, data=payload, headers=headers, auth=(username, password))
-            print(response.text)
-            print(f"{report_name.upper()} | {report_id} | Status: {response.status_code} | Instance: {instance_key} | Account: {account}")
+            try:
+                response = requests.post(url, data=payload, headers=headers, auth=(username, password))
+                print(response.text)
+                print(f"{report_name.upper()} | {report_id} | Status: {response.status_code} | Instance: {instance_key} | Account: {account}")
 
-            if response.status_code == 200:
-                result, identifier = handle_report_response(response.text, account, report_name, instance_key)
-                if result is True:
-                    print(f"{report_name} report started and DB updated for account {account} - instance {instance_key}")
-                    break
-                elif result == "RUNNING":
-                    print(f"Report for {account} ({instance_key}) is still running. Waiting 60 seconds before retrying...")
-                    time.sleep(60)
-                    continue
-                elif result == "DUPLICATE":
-                    print(f"Duplicate report identifier {identifier} returned {account} ({instance_key}) - {report_name}. Waiting 60 seconds before retrying...")
-                    time.sleep(60)
-                    continue
-                elif result == "ERROR":
-                    print(f"Skipping {report_name} for account {account} - instance {instance_key} due to error")
-                    break
+                status = "UNKNOWN"
+                identifier = "None"
+                status_message = "No response"
+                db_updated = False
+
+                if response.status_code == 200:
+                    result, identifier = handle_report_response(response.text, account, report_name, instance_key)
+                    
+                    try:
+                        root = ET.fromstring(response.text)
+                        ns = {'ns1': 'http://www.collaboratemd.com/api/v1/'}
+                        status_elem = root.find('ns1:Status', ns)
+                        status_message_elem = root.find('ns1:StatusMessage', ns)
+                        if status_elem is not None:
+                            status = status_elem.text
+                        if status_message_elem is not None:
+                            status_message = status_message_elem.text
+                    except Exception:
+                        pass
+
+                    if result is True:
+                        print(f"{report_name} report started and DB updated for account {account} - instance {instance_key}")
+                        db_updated = True
+                        record_attempt(instance_key, account, report_name, report_id, response.status_code, status, identifier, status_message, retries, db_updated, results_list, results_lock)
+                        break
+                    elif result == "RUNNING":
+                        print(f"Report for {account} ({instance_key}) is still running. Waiting 60 seconds before retrying...")
+                        retries += 1
+                        time.sleep(60)
+                        continue
+                    elif result == "DUPLICATE":
+                        print(f"Duplicate report identifier {identifier} returned {account} ({instance_key}) - {report_name}. Waiting 60 seconds before retrying...")
+                        retries += 1
+                        time.sleep(60)
+                        continue
+                    elif result == "ERROR":
+                        print(f"Skipping {report_name} for account {account} - instance {instance_key} due to error")
+                        record_attempt(instance_key, account, report_name, report_id, response.status_code, "ERROR", identifier, status_message, retries, False, results_list, results_lock)
+                        break
+                    else:
+                        print(f"Failed to handle response for {report_name} - account {account} - instance {instance_key}")
+                        record_attempt(instance_key, account, report_name, report_id, response.status_code, "HANDLE_FAILED", identifier, status_message, retries, False, results_list, results_lock)
+                        break
                 else:
-                    print(f"Failed to handle response for {report_name} - account {account} - instance {instance_key}")
+                    print(f"API call failed for {report_name} - account {account} - instance {instance_key} - Status: {response.status_code}")
+                    record_attempt(instance_key, account, report_name, report_id, response.status_code, f"HTTP_{response.status_code}", "None", f"API Call Failed: HTTP {response.status_code}", retries, False, results_list, results_lock)
                     break
-            else:
-                print(f"API call failed for {report_name} - account {account} - instance {instance_key} - Status: {response.status_code}")
+            except Exception as e:
+                print(f"Exception during report generation for {report_name} - account {account} - instance {instance_key}: {e}")
+                record_attempt(instance_key, account, report_name, report_id, 0, "EXCEPTION", "None", str(e), retries, False, results_list, results_lock)
                 break
 
         time.sleep(5)
@@ -143,6 +193,10 @@ def run_all_reports(max_workers=None):
     if max_workers is None:
         max_workers = min(32, max(1, len(instance_list)))
 
+    # List to collect results from all threads
+    results_list = []
+    results_lock = threading.Lock()
+
     def process_instance(instance_key):
         instance_config = instances[instance_key]
         print(f"\n{'=' * 80}")
@@ -163,7 +217,9 @@ def run_all_reports(max_workers=None):
                 base_url=instance_config['api_base_url'],
                 username=instance_config['username'],
                 password=instance_config['password'],
-                accounts=instance_config['accounts']
+                accounts=instance_config['accounts'],
+                results_list=results_list,
+                results_lock=results_lock
             )
 
     # Run instances concurrently
@@ -175,6 +231,28 @@ def run_all_reports(max_workers=None):
                 fut.result()
             except Exception as e:
                 print(f"Instance {key} raised an exception: {e}")
+
+    # Write summary CSV
+    if results_list:
+        csv_dir = 'csv_files/run_summaries'
+        os.makedirs(csv_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        csv_file = os.path.join(csv_dir, f"summary_{timestamp}.csv")
+        
+        fields = [
+            'instance_key', 'customer_account', 'report_name', 'report_id',
+            'http_status', 'api_status', 'identifier', 'status_message',
+            'retries', 'db_updated'
+        ]
+        
+        try:
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(results_list)
+            print(f"\n✓ Generated runs summary written to: {csv_file}")
+        except Exception as e:
+            print(f"\n✗ Failed to write run summary CSV: {e}")
 
 
 if __name__ == "__main__":
