@@ -222,7 +222,13 @@ def promote_numeric_columns(df):
     """
     Attempt to promote text columns to numeric types.
     This ensures consistent type inference across runs.
+
+    A column is NOT promoted if any non-empty value has a leading zero followed by
+    another digit (e.g. "0301", "0450"). Real measurements never have leading zeros;
+    such values are identifiers/codes and must stay as text to avoid silent data loss.
     """
+    leading_zero_re = re.compile(r'^0\d')
+
     for col in df.columns:
         # Skip if already numeric or date
         if df[col].dtype != 'object':
@@ -248,9 +254,20 @@ def promote_numeric_columns(df):
         if num_mask > 0:
             num_converted = int((conv_arr & mask_arr).sum())
             if num_converted == num_mask:
-                df[col] = numeric_series
+                # Guard: if any value has a leading zero before another digit (e.g. "0301"),
+                # it's an identifier — promoting to float would silently destroy that zero.
+                has_leading_zero = (
+                    df[col][non_null_original]
+                    .astype(str)
+                    .str.strip()
+                    .apply(lambda v: bool(leading_zero_re.match(v)))
+                    .any()
+                )
+                if not has_leading_zero:
+                    df[col] = numeric_series
 
     return df
+
 
 
 def promote_date_columns(df):
@@ -435,7 +452,6 @@ def validate_all_tables(engine, schema, tables):
 
         df_struct = infer_df_structure(df)
 
-        # Check if structures are exactly the same
         if db_struct != df_struct:
             # Build detailed error message
             error_parts = [f"Schema mismatch for {schema}.{table_name}"]
