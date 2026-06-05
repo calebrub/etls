@@ -3,6 +3,9 @@ import io
 import zipfile
 import base64
 from datetime import date, datetime
+import time
+import concurrent.futures
+import threading
 
 import requests
 import logging
@@ -76,9 +79,154 @@ def load_report_matrix(instance_key=None):
     return report_matrix
 
 
+def find_element(root, local_name):
+    """
+    Finds the first child/descendant element matching the local name,
+    ignoring namespaces.
+    """
+    for elem in root.iter():
+        if elem.tag.split('}')[-1] == local_name:
+            return elem
+    return None
+
+
+def has_instance_key_column(schema):
+    """
+    Checks if the account_reports table has an instance_key column.
+    """
+    conn = postgres_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_schema = %s AND table_name = 'account_reports' AND column_name = 'instance_key'
+    """, (schema,))
+    has_column = cursor.fetchone() is not None
+    cursor.close()
+    conn.close()
+    return has_column
+
+
+def fetch_report_data_for_customer(base_url, username, password, customer_id, report_id, report_name, instance_key, max_retries=100, retry_delay=60):
+    """
+    Fetches, decodes, and parses a single report result from CollaborateMD API.
+    Returns (headers, list of rows, http_status, api_status, status_message, retries).
+    """
+    http_status = 0
+    api_status = "UNKNOWN"
+    status_message = "No response"
+    retries = 0
+
+    for attempt in range(max_retries):
+        retries = attempt
+        url = f"{base_url}/customer/{customer_id}/reports/results/{report_id}"
+        try:
+            response = requests.post(url, auth=(username, password))
+            http_status = response.status_code
+        except requests.exceptions.RequestException as e:
+            api_status = "EXCEPTION"
+            status_message = str(e)
+            print(f"  → [ERROR] Request failed for {report_name} - account {customer_id}: {e}")
+            break
+
+        if response.status_code != 200:
+            api_status = f"HTTP_{response.status_code}"
+            status_message = f"API call failed with status code {response.status_code}"
+            print(f"  → [ERROR] Received status code {response.status_code} for {report_name} - account {customer_id}")
+            break
+
+        try:
+            root = ET.fromstring(response.content)
+        except ET.ParseError as e:
+            api_status = "XML_PARSE_ERROR"
+            status_message = f"Failed to parse XML response: {e}"
+            print(f"Error parsing XML response for {report_name} - account {customer_id}: {e}")
+            break
+
+        # Find elements namespace-agnostically
+        data_element = find_element(root, 'Data')
+        status_element = find_element(root, 'Status')
+        status_msg_element = find_element(root, 'StatusMessage')
+
+        if status_msg_element is not None:
+            status_message = status_msg_element.text or ""
+
+        if status_element is not None:
+            api_status = status_element.text or ""
+
+        if status_element is not None and status_element.text == 'REPORT RUNNING':
+            print(f"  → [RUNNING] {report_name} for account {customer_id} is still running. "
+                  f"Waiting {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                continue
+            else:
+                api_status = "TIMEOUT"
+                print(f"  → [TIMEOUT] {report_name} for account {customer_id} did not complete in time.")
+                break
+
+        if data_element is not None and data_element.text:
+            try:
+                zip_bytes = base64.b64decode(data_element.text)
+                with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
+                    for zip_info in zip_file.infolist():
+                        if zip_info.filename.endswith('.csv'):
+                            with zip_file.open(zip_info) as csv_file:
+                                decoded = io.TextIOWrapper(csv_file, encoding='utf-8')
+                                csv_reader = csv.reader(decoded)
+                                try:
+                                    headers = [h.strip() for h in next(csv_reader)]
+                                except StopIteration:
+                                    continue
+
+                                rows = []
+                                for row in csv_reader:
+                                    row_values = [v.strip() if v.strip() else None for v in row]
+                                    while len(row_values) < len(headers):
+                                        row_values.append(None)
+                                    rows.append([customer_id, instance_key] + row_values)
+                                api_status = "SUCCESS"
+                                return headers, rows, http_status, api_status, status_message, retries
+            except Exception as e:
+                api_status = "ZIP_CSV_ERROR"
+                status_message = f"Failed to process zip/CSV: {e}"
+                print(f"  → [ERROR] Failed to process zip/CSV for {report_name} - account {customer_id}: {e}")
+                break
+            break
+        else:
+            xml_status = api_status
+            api_status = "NO_DATA"
+            status_info = f" (HTTP {http_status}, XML Status: {xml_status})"
+            api_msg = f" - API Message: {status_message}" if status_message and status_message != "No response" else ""
+            print(f"  → [WARNING] No data element found in response for {report_name} - account {customer_id}.{status_info}{api_msg}")
+            break
+
+    return None, None, http_status, api_status, status_message, retries
+
+
+def write_report_to_csv(csv_dir, instance_key, report_name, headers, rows, instance_count):
+    """
+    Writes the aggregated report rows to a CSV file.
+    Creates subdirectories for isolation if multiple instances exist.
+    """
+    if instance_count > 1:
+        instance_csv_dir = os.path.join(csv_dir, instance_key)
+        os.makedirs(instance_csv_dir, exist_ok=True)
+        file_path = os.path.join(instance_csv_dir, f"{report_name}.csv")
+    else:
+        file_path = os.path.join(csv_dir, f"{report_name}.csv")
+
+    with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+    logging.info(f"CSV file written: {file_path}")
+    print(f"✓ Fetched {report_name}: {len(rows)} rows from {len([r for r in rows if r[0]])}")
+
+
 def fetch_reports_to_csv():
     """
-    Fetch reports for all instances and write to CSV files.
+    Fetch reports for all instances and write to CSV files in parallel.
     Creates separate CSV files per instance if multiple instances exist.
     """
     instances = config_loader.get_instances()
@@ -90,27 +238,15 @@ def fetch_reports_to_csv():
     print(f"{'=' * 80}")
     print(f"Processing {len(instance_list)} instance(s): {', '.join(instance_list)}\n")
 
-    # Check if account_reports table has instance_key column for data isolation
-    conn = postgres_connection()
-    cursor = conn.cursor()
-    cursor.execute(f"""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_schema = %s AND table_name = 'account_reports' AND column_name = 'instance_key'
-    """, (schema,))
-    has_instance_column = cursor.fetchone() is not None
-    cursor.close()
-    conn.close()
+    has_instance_column = has_instance_key_column(schema)
 
     csv_dir = 'csv_files'
     os.makedirs(csv_dir, exist_ok=True)
 
+    # Collect tasks to be executed in parallel
+    tasks = []
     for instance_key in instance_list:
         instance_config = instances[instance_key]
-        print(f"\n{'-' * 80}")
-        print(f"INSTANCE: {instance_key}")
-        print(f"{'-' * 80}")
-
         base_url = instance_config['api_base_url']
         username = instance_config['username']
         password = instance_config['password']
@@ -128,60 +264,120 @@ def fetch_reports_to_csv():
             all_report_names.update(report_matrix.get(customer, {}).keys())
 
         for report_name in sorted(all_report_names):
-            all_rows = []
-            headers_with_customer = None
-
             for customer_id in customers:
                 report_id = report_matrix.get(customer_id, {}).get(report_name)
                 if not report_id:
                     continue
+                tasks.append({
+                    'instance_key': instance_key,
+                    'customer_id': customer_id,
+                    'report_name': report_name,
+                    'report_id': report_id,
+                    'base_url': base_url,
+                    'username': username,
+                    'password': password
+                })
 
-                url = f"{base_url}/customer/{customer_id}/reports/results/{report_id}"
-                response = requests.post(url, auth=(username, password))
+    if not tasks:
+        print("No tasks to execute.")
+        return
 
-                if response.status_code == 200:
-                    root = ET.fromstring(response.content)
-                    data_element = root.find('Data')
-                    if data_element is not None and data_element.text:
-                        zip_bytes = base64.b64decode(data_element.text)
-                        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
-                            for zip_info in zip_file.infolist():
-                                if zip_info.filename.endswith('.csv'):
-                                    with zip_file.open(zip_info) as csv_file:
-                                        decoded = io.TextIOWrapper(csv_file, encoding='utf-8')
-                                        csv_reader = csv.reader(decoded)
+    results_list = []
+    results_lock = threading.Lock()
 
-                                        try:
-                                            headers = [h.strip() for h in next(csv_reader)]
-                                        except StopIteration:
-                                            continue
+    accumulated_data = {}
+    accumulated_lock = threading.Lock()
 
-                                        if headers_with_customer is None:
-                                            headers_with_customer = ['customer_account', 'instance_key'] + headers
+    def worker(task):
+        instance_key = task['instance_key']
+        customer_id = task['customer_id']
+        report_name = task['report_name']
+        report_id = task['report_id']
+        base_url = task['base_url']
+        username = task['username']
+        password = task['password']
 
-                                        for row in csv_reader:
-                                            row_values = [v.strip() if v.strip() else None for v in row]
-                                            while len(row_values) < len(headers):
-                                                row_values.append(None)
-                                            all_rows.append([customer_id, instance_key] + row_values)
+        headers, rows, http_status, api_status, status_message, retries = fetch_report_data_for_customer(
+            base_url, username, password, customer_id, report_id, report_name, instance_key
+        )
 
-            if all_rows and headers_with_customer:
-                # Create subdirectory for instance if multiple instances
-                if len(instance_list) > 1:
-                    instance_csv_dir = os.path.join(csv_dir, instance_key)
-                    os.makedirs(instance_csv_dir, exist_ok=True)
-                    file_path = os.path.join(instance_csv_dir, f"{report_name}.csv")
-                else:
-                    file_path = os.path.join(csv_dir, f"{report_name}.csv")
+        rows_fetched = len(rows) if rows else 0
 
-                with open(file_path, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(headers_with_customer)
-                    writer.writerows(all_rows)
-                logging.info(f"CSV file written: {file_path}")
-                print(f"✓ Fetched {report_name}: {len(all_rows)} rows from {len([r for r in all_rows if r[0]])}")
-            else:
-                print(f"⊘ No data for report: {report_name}")
+        # Add to results_list for fetch summary report
+        with results_lock:
+            results_list.append({
+                'instance_key': instance_key,
+                'customer_account': customer_id,
+                'report_name': report_name.upper(),
+                'report_id': report_id,
+                'http_status': http_status,
+                'api_status': api_status,
+                'status_message': status_message,
+                'retries': retries,
+                'rows_fetched': rows_fetched
+            })
+
+        if rows:
+            with accumulated_lock:
+                key = (instance_key, report_name)
+                if key not in accumulated_data:
+                    accumulated_data[key] = {'headers': None, 'rows': []}
+                if accumulated_data[key]['headers'] is None and headers:
+                    accumulated_data[key]['headers'] = ['customer_account', 'instance_key'] + headers
+                accumulated_data[key]['rows'].extend(rows)
+
+    # Run tasks concurrently
+    max_workers = min(32, max(1, len(tasks)))
+    print(f"Fetching {len(tasks)} reports in parallel using {max_workers} threads...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor.map(worker, tasks)
+
+    # Write CSV files
+    written_reports = set()
+    for (instance_key, report_name), data in accumulated_data.items():
+        if data['rows'] and data['headers']:
+            write_report_to_csv(csv_dir, instance_key, report_name, data['headers'], data['rows'], len(instance_list))
+            written_reports.add((instance_key, report_name.upper()))
+        else:
+            print(f"⊘ No data for report: {report_name}")
+
+    # Update file_written status in results_list
+    for result in results_list:
+        key = (result['instance_key'], result['report_name'])
+        result['file_written'] = 'TRUE' if key in written_reports else 'FALSE'
+
+    # Write fetch summary CSV
+    if results_list:
+        summary_dir = 'csv_files/fetch_summaries'
+        os.makedirs(summary_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        csv_file = os.path.join(summary_dir, f"fetch_summary_{timestamp}.csv")
+        latest_csv_file = os.path.join(summary_dir, "latest_fetch_summary.csv")
+
+        fields = [
+            'instance_key', 'customer_account', 'report_name', 'report_id',
+            'http_status', 'api_status', 'status_message',
+            'retries', 'rows_fetched', 'file_written'
+        ]
+
+        try:
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(results_list)
+            print(f"\n✓ Generated fetch summary written to: {csv_file}")
+        except Exception as e:
+            print(f"\n✗ Failed to write fetch summary CSV: {e}")
+
+        try:
+            with open(latest_csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(results_list)
+            print(f"✓ Copied latest fetch summary to: {latest_csv_file}")
+        except Exception as e:
+            print(f"✗ Failed to write latest summary CSV: {e}")
 
 
 def to_snake_case(name):
