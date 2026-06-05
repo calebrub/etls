@@ -1,0 +1,184 @@
+{
+  "name": "Reporting SAS ETL",
+  "nodes": [
+    {
+      "parameters": {
+        "command": "cd /home/azureuser/etls/combined && python3 generate_identifiers.py"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        32,
+        672
+      ],
+      "id": "367dce77-fabb-4ecd-8e0b-c1aa7c88ec9f",
+      "name": "Generate Identifiers",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/azureuser/etls/combined/csv_files/run_summaries/latest_summary.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        256,
+        672
+      ],
+      "id": "24ea3a3e-b254-45c4-ae7a-13e53441781e",
+      "name": "Read Summary File"
+    },
+    {
+      "parameters": {
+        "fileFormat": "csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        464,
+        672
+      ],
+      "id": "a0aa7157-0f03-4397-b2a7-41d0218d5163",
+      "name": "Parse CSV to Table"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        672
+      ],
+      "id": "4a11b3e3-7887-415f-ad8c-39722a18afb8",
+      "name": "Wait",
+      "webhookId": "c15c91e9-72c0-47f2-9ed5-75b9bfbef38b"
+    },
+    {
+      "parameters": {
+        "command": "cd /home/azureuser/etls/combined && python3 fetch_and_load_reports.py "
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        912,
+        672
+      ],
+      "id": "90d7471c-5b4a-42a7-9ff3-5b2a5641209b",
+      "name": "Fetch and Load Reports"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -192,
+        672
+      ],
+      "id": "a65f3fd7-9759-4e99-b9ab-d7be87518d41",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        480
+      ],
+      "id": "8248e28a-c798-44f1-bb0b-bf09f898c291",
+      "name": "When clicking ‘Execute workflow’"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Generate Identifiers": {
+      "main": [
+        [
+          {
+            "node": "Read Summary File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Summary File": {
+      "main": [
+        [
+          {
+            "node": "Parse CSV to Table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CSV to Table": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Fetch and Load Reports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate Identifiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Generate Identifiers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "6bc7513d-65aa-4600-bd7f-d13f8b3a9e12",
+  "meta": {
+    "instanceId": "c17c0b166202ac1d595a1927b9531d214d1fb0e9ebcc7e1a88fc4ad5ae45a494"
+  },
+  "id": "Wa1kSwyUKk2bP88c",
+  "tags": []
+}
