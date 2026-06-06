@@ -262,26 +262,10 @@ def write_report_to_csv(csv_dir, instance_key, report_name, headers, rows, insta
     print(f"✓ Fetched {report_name}: {len(rows)} rows from {len([r for r in rows if r[0]])}")
 
 
-def fetch_reports_to_csv():
+def collect_fetch_tasks(instance_list, instances, schema, has_instance_column):
     """
-    Fetch reports for all instances and write to CSV files in parallel.
-    Creates separate CSV files per instance if multiple instances exist.
+    Iterates over all instances and customer accounts to build a list of fetch tasks.
     """
-    instances = config_loader.get_instances()
-    instance_list = config_loader.list_instances()
-    schema = postgres_config['schema']
-
-    print(f"\n{'=' * 80}")
-    print(f"FETCH REPORTS TO CSV - MULTI-INSTANCE MODE")
-    print(f"{'=' * 80}")
-    print(f"Processing {len(instance_list)} instance(s): {', '.join(instance_list)}\n")
-
-    has_instance_column = has_instance_key_column(schema)
-
-    csv_dir = 'csv_files'
-    os.makedirs(csv_dir, exist_ok=True)
-
-    # Collect tasks to be executed in parallel
     tasks = []
     for instance_key in instance_list:
         instance_config = instances[instance_key]
@@ -317,6 +301,67 @@ def fetch_reports_to_csv():
                     'username': username,
                     'password': password
                 })
+    return tasks
+
+
+def write_fetch_summary(results_list):
+    """
+    Writes the run metadata and results summary to a fetch_summary CSV file.
+    """
+    if not results_list:
+        return
+
+    summary_dir = 'csv_files/fetch_summaries'
+    os.makedirs(summary_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    csv_file = os.path.join(summary_dir, f"fetch_summary_{timestamp}.csv")
+    latest_csv_file = os.path.join(summary_dir, "latest_fetch_summary.csv")
+
+    fields = [
+        'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
+        'http_status', 'api_status', 'status_message',
+        'retries', 'rows_fetched', 'file_written'
+    ]
+
+    try:
+        with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(results_list)
+        print(f"\n✓ Generated fetch summary written to: {csv_file}")
+    except Exception as e:
+        print(f"\n✗ Failed to write fetch summary CSV: {e}")
+
+    try:
+        with open(latest_csv_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            writer.writerows(results_list)
+        print(f"✓ Copied latest fetch summary to: {latest_csv_file}")
+    except Exception as e:
+        print(f"✗ Failed to write latest summary CSV: {e}")
+
+
+def fetch_reports_to_csv():
+    """
+    Fetch reports for all instances and write to CSV files in parallel.
+    Creates separate CSV files per instance if multiple instances exist.
+    """
+    instances = config_loader.get_instances()
+    instance_list = config_loader.list_instances()
+    schema = postgres_config['schema']
+
+    print(f"\n{'=' * 80}")
+    print(f"FETCH REPORTS TO CSV - MULTI-INSTANCE MODE")
+    print(f"{'=' * 80}")
+    print(f"Processing {len(instance_list)} instance(s): {', '.join(instance_list)}\n")
+
+    has_instance_column = has_instance_key_column(schema)
+
+    csv_dir = 'csv_files'
+    os.makedirs(csv_dir, exist_ok=True)
+
+    tasks = collect_fetch_tasks(instance_list, instances, schema, has_instance_column)
 
     if not tasks:
         print("No tasks to execute.")
@@ -390,36 +435,7 @@ def fetch_reports_to_csv():
         result['file_written'] = 'TRUE' if key in written_reports else 'FALSE'
 
     # Write fetch summary CSV
-    if results_list:
-        summary_dir = 'csv_files/fetch_summaries'
-        os.makedirs(summary_dir, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        csv_file = os.path.join(summary_dir, f"fetch_summary_{timestamp}.csv")
-        latest_csv_file = os.path.join(summary_dir, "latest_fetch_summary.csv")
-
-        fields = [
-            'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
-            'http_status', 'api_status', 'status_message',
-            'retries', 'rows_fetched', 'file_written'
-        ]
-
-        try:
-            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=fields)
-                writer.writeheader()
-                writer.writerows(results_list)
-            print(f"\n✓ Generated fetch summary written to: {csv_file}")
-        except Exception as e:
-            print(f"\n✗ Failed to write fetch summary CSV: {e}")
-
-        try:
-            with open(latest_csv_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=fields)
-                writer.writeheader()
-                writer.writerows(results_list)
-            print(f"✓ Copied latest fetch summary to: {latest_csv_file}")
-        except Exception as e:
-            print(f"✗ Failed to write latest summary CSV: {e}")
+    write_fetch_summary(results_list)
 
 
 def to_snake_case(name):
@@ -824,46 +840,20 @@ def coerce_df_to_db_schema(df, db_struct):
 
 # ---------- Main ETL ----------
 
-def load_csvs_to_db():
-    schema = postgres_config['schema']
-
-    engine = create_engine(
-        f"postgresql://{postgres_config['user']}:"
-        f"{postgres_config['password']}@"
-        f"{postgres_config['host']}:"
-        f"{postgres_config['port']}/"
-        f"{postgres_config['database']}"
-    )
-
-    # Get CSV files for active instances (or root csv_files if single instance), avoiding summaries
-    instance_list = config_loader.list_instances()
-    csv_files = []
-    if len(instance_list) > 1:
-        for instance_key in instance_list:
-            csv_files.extend(glob.glob(f"csv_files/{instance_key}/*.csv"))
-    else:
-        csv_files = glob.glob("csv_files/*.csv")
-
-
+def extract_and_transform_csvs(engine, schema, csv_files):
+    """
+    Extracts data from the CSV files, cleans columns, coerces types,
+    and merges dataframes for identical tables.
+    """
     tables = {}
-
-    print("\n" + "=" * 80)
-    print("EXTRACT & TRANSFORM PHASE")
-    print("=" * 80 + "\n")
-
-    # ---------- Extract + Transform (NO DB TOUCH) ----------
-    print("csv_files", csv_files)
     for csv_file in csv_files:
-        # Extract table name from filename
         table_name = to_snake_case(os.path.splitext(os.path.basename(csv_file))[0])
-
         df = pd.read_csv(csv_file, low_memory=False)
 
         # Preserve instance_key column if it exists
         instance_key_col = None
         if 'instance_key' in df.columns:
             instance_key_col = df['instance_key'].copy()
-            # Remove it temporarily for processing
             df = df.drop(columns=['instance_key'])
 
         df.columns = [to_snake_case(c) for c in df.columns]
@@ -898,13 +888,11 @@ def load_csvs_to_db():
             missing_cols = existing_cols - new_cols
             extra_cols = new_cols - existing_cols
 
-            # Add missing columns to current df with empty strings
             if missing_cols:
                 for col in missing_cols:
                     df[col] = ""
                 print(f"  ⚠ Added missing columns to {csv_file}: {', '.join(sorted(missing_cols))}")
 
-            # Remove extra columns from current df if they exist in existing but not in new
             if extra_cols:
                 print(f"  ⚠ Removing extra columns from {csv_file}: {', '.join(sorted(extra_cols))}")
                 df = df.drop(columns=extra_cols, errors='ignore')
@@ -912,26 +900,20 @@ def load_csvs_to_db():
             # Ensure column order matches existing dataframe
             df = df[list(existing_df.columns)]
 
-            # Safe to merge - structures are now identical
+            # Safe to merge
             df = pd.concat([existing_df, df], ignore_index=True)
             print(f"✓ Merged CSV: {csv_file} ({len(df)} rows total in table '{table_name}')")
         else:
             print(f"✓ Loaded CSV: {csv_file} ({len(df)} rows, {len(df.columns)} columns)")
 
         tables[table_name] = df
+    return tables
 
-    print("\n" + "=" * 80)
-    print("VALIDATION PHASE")
-    print("=" * 80 + "\n")
 
-    # ---------- Pre-flight schema validation (STRICT) ----------
-    validate_all_tables(engine, schema, tables)
-
-    print("\n" + "=" * 80)
-    print("LOAD PHASE")
-    print("=" * 80 + "\n")
-
-    # ---------- Load (safe) ----------
+def load_tables_to_db(engine, schema, tables):
+    """
+    Safely truncates and loads the processed DataFrames into PostgreSQL.
+    """
     for table_name, df in tables.items():
         try:
             truncate_table(engine, schema, table_name)
@@ -947,6 +929,48 @@ def load_csvs_to_db():
             print(f"✗ Failed to load {schema}.{table_name}: {str(e)}")
             engine.dispose()  # Close all connections
             raise
+
+
+def load_csvs_to_db():
+    schema = postgres_config['schema']
+
+    engine = create_engine(
+        f"postgresql://{postgres_config['user']}:"
+        f"{postgres_config['password']}@"
+        f"{postgres_config['host']}:"
+        f"{postgres_config['port']}/"
+        f"{postgres_config['database']}"
+    )
+
+    # Get CSV files for active instances (or root csv_files if single instance), avoiding summaries
+    instance_list = config_loader.list_instances()
+    csv_files = []
+    if len(instance_list) > 1:
+        for instance_key in instance_list:
+            csv_files.extend(glob.glob(f"csv_files/{instance_key}/*.csv"))
+    else:
+        csv_files = glob.glob("csv_files/*.csv")
+
+    print("\n" + "=" * 80)
+    print("EXTRACT & TRANSFORM PHASE")
+    print("=" * 80 + "\n")
+    print("csv_files", csv_files)
+    
+    tables = extract_and_transform_csvs(engine, schema, csv_files)
+
+    print("\n" + "=" * 80)
+    print("VALIDATION PHASE")
+    print("=" * 80 + "\n")
+
+    # ---------- Pre-flight schema validation (STRICT) ----------
+    validate_all_tables(engine, schema, tables)
+
+    print("\n" + "=" * 80)
+    print("LOAD PHASE")
+    print("=" * 80 + "\n")
+
+    # ---------- Load (safe) ----------
+    load_tables_to_db(engine, schema, tables)
 
     run_sql_files(engine, schema)
 
