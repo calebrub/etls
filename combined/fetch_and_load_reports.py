@@ -774,8 +774,15 @@ def load_csvs_to_db():
         f"{postgres_config['database']}"
     )
 
-    # Get CSV files from all subdirectories (instances) or root csv_files dir
-    csv_files = glob.glob("csv_files/**/*.csv", recursive=True)
+    # Get CSV files for active instances (or root csv_files if single instance), avoiding summaries
+    instance_list = config_loader.list_instances()
+    csv_files = []
+    if len(instance_list) > 1:
+        for instance_key in instance_list:
+            csv_files.extend(glob.glob(f"csv_files/{instance_key}/*.csv"))
+    else:
+        csv_files = glob.glob("csv_files/*.csv")
+
 
     tables = {}
 
