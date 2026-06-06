@@ -777,6 +777,51 @@ def truncate_table(engine, schema, table_name):
     print(f"✓ Truncated {schema}.{table_name}")
 
 
+def coerce_df_to_db_schema(df, db_struct):
+    """
+    Coerces DataFrame column types to match the expected DB schema types.
+    This avoids hardcoding column exclusions and prevents validation failures.
+    """
+    db_type_map = {col: dtype for col, dtype in db_struct}
+    
+    for col in df.columns:
+        if col in db_type_map:
+            db_type = db_type_map[col].lower()
+            
+            # 1. Text / Char types: Keep as string, just fillna/replace to avoid 'nan'
+            if 'text' in db_type or 'char' in db_type or 'varchar' in db_type:
+                df[col] = df[col].fillna("").astype(str).str.strip().replace({"nan": "", "NaT": "", "<NA>": ""})
+                
+            # 2. Integer types: Coerce to nullable Int64
+            elif 'int' in db_type or 'serial' in db_type:
+                df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+                
+            # 3. Float / Numeric types: Coerce to float64
+            elif 'double' in db_type or 'real' in db_type or 'numeric' in db_type or 'decimal' in db_type:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+            # 4. Date types: Parse as date
+            elif 'date' == db_type:
+                cleaned = df[col].astype(str).str.strip().replace({"": None, "nan": None, "<NA>": None, "NaT": None})
+                parsed = pd.to_datetime(cleaned, format="%m/%d/%Y", errors="coerce")
+                if parsed.isna().all() and cleaned.notna().any():
+                    parsed = pd.to_datetime(cleaned, errors="coerce")
+                df[col] = parsed.dt.date
+                
+            # 5. Timestamp types: Parse as datetime
+            elif 'timestamp' in db_type:
+                cleaned = df[col].astype(str).str.strip().replace({"": None, "nan": None, "<NA>": None, "NaT": None})
+                df[col] = pd.to_datetime(cleaned, errors="coerce")
+        else:
+            # Column is new and not in the DB yet: run dynamic promotion on it
+            temp_df = pd.DataFrame({col: df[col]})
+            temp_df = promote_numeric_columns(temp_df)
+            temp_df = promote_date_columns(temp_df)
+            df[col] = temp_df[col]
+            
+    return df
+
+
 # ---------- Main ETL ----------
 
 def load_csvs_to_db():
@@ -823,9 +868,13 @@ def load_csvs_to_db():
 
         df.columns = [to_snake_case(c) for c in df.columns]
 
-        # Promote types in correct order
-        df = promote_numeric_columns(df)
-        df = promote_date_columns(df)
+        # Coerce types to match target DB schema if table exists, else fallback to dynamic promotion
+        db_struct = get_db_structure(engine, schema, table_name)
+        if db_struct is not None:
+            df = coerce_df_to_db_schema(df, db_struct)
+        else:
+            df = promote_numeric_columns(df)
+            df = promote_date_columns(df)
 
         # Replace full-null columns
         for col in df.columns:
