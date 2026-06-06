@@ -3,3 +3,15 @@
 *.log
 __pycache__/
 *.pyc
+
+# Exclude combined folder cache and logs
+combined/__pycache__/
+combined/__pycache__/config_loader.cpython-310.pyc
+combined/__pycache__/config_loader.cpython-313.pyc
+combined/__pycache__/fetch_and_load_reports.cpython-310.pyc
+combined/config/__pycache__/
+combined/config/__pycache__/config.cpython-313.pyc
+combined/logs/
+combined/logs/fetch_and_load_reports.log
+combined/logs/generate_identifiers.log
+

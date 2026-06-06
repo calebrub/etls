@@ -73,6 +73,38 @@ def postgres_connection():
         port=postgres_config['port']
     )
 
+
+def create_account_reports_table_if_not_exists():
+    """
+    Creates the account_reports table and its index in the database if they do not exist.
+    """
+    conn = postgres_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS {schema}.account_reports (
+                id SERIAL PRIMARY KEY,
+                customer_account VARCHAR(20) NOT NULL,
+                report_name VARCHAR(100) NOT NULL,
+                identifier VARCHAR(20) NOT NULL,
+                status INTEGER DEFAULT 1,
+                instance_key VARCHAR(100) NOT NULL
+            );
+        """)
+        cur.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_account_report 
+            ON {schema}.account_reports (customer_account, report_name);
+        """)
+        conn.commit()
+        print(f"✓ Ensured database table '{schema}.account_reports' exists.")
+    except Exception as e:
+        print(f"Error creating account_reports table: {e}")
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
+
+
 def handle_report_response(response_text, customer_account, report_name, instance_key):
     try:
         root = ET.fromstring(response_text)
@@ -282,6 +314,9 @@ def run_all_reports(max_workers=None):
     Generate reports for all configured instances.
     Runs each instance in parallel using a thread pool. Per-instance behavior is unchanged (reports are run for each account sequentially).
     """
+    # Create the state table if it does not exist
+    create_account_reports_table_if_not_exists()
+
     instances = config_loader.get_instances()
     instance_list = config_loader.list_instances()
 

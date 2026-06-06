@@ -11,7 +11,12 @@ LOCAL_DIR="combined"
 # -a: archive mode (preserves permissions, times, etc.)
 # -v: verbose
 # -z: compress during transfer
-rsync -avz --exclude 'csv_files' "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
+rsync -avz \
+  --exclude 'csv_files' \
+  --exclude '__pycache__' \
+  --exclude '*.pyc' \
+  --exclude 'logs' \
+  "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
 
 # --- AUTOMATION WITH PASSWORD ---
 # If you want to put the password in this script (NOT RECOMMENDED for security),
@@ -21,4 +26,9 @@ rsync -avz --exclude 'csv_files' "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${R
 # 2. Uncomment the lines below and replace 'YOUR_PASSWORD_HERE'
 #
 # export SSHPASS='YOUR_PASSWORD_HERE'//84pVrZ6c5XVwF9dnl45jd
-# sshpass -e rsync -avz --exclude 'csv_files' "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
+# sshpass -e rsync -avz \
+#   --exclude 'csv_files' \
+#   --exclude '__pycache__' \
+#   --exclude '*.pyc' \
+#   --exclude 'logs' \
+#   "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
