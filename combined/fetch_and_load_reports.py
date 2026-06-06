@@ -502,7 +502,14 @@ def promote_numeric_columns(df):
                     .any()
                 )
                 if not has_leading_zero:
+                    # If the converted series is float64 but only contains integer values,
+                    # cast it to Pandas modern nullable integer 'Int64' to prevent float64/double precision promotion.
+                    if numeric_series.dtype == 'float64':
+                        non_null_vals = numeric_series.dropna()
+                        if len(non_null_vals) > 0 and (non_null_vals % 1 == 0).all():
+                            numeric_series = numeric_series.astype('Int64')
                     df[col] = numeric_series
+
 
     return df
 
