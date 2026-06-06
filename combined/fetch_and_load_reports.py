@@ -688,7 +688,16 @@ def validate_all_tables(engine, schema, tables):
             # Refresh db_struct
             db_struct = get_db_structure(engine, schema, table_name)
 
+        # Auto-reorder CSV columns to match DB column order if they contain the exact same set
+        db_cols_list = [col for col, _ in db_struct]
+        db_cols_set = set(db_cols_list)
+        csv_cols_set = set(df.columns)
+        if db_cols_set == csv_cols_set:
+            df = df[db_cols_list]
+            tables[table_name] = df
+
         df_struct = infer_df_structure(df)
+
 
         if db_struct != df_struct:
             # Build detailed error message
