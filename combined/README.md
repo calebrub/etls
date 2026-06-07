@@ -4,7 +4,7 @@ This ETL pipeline fetches report data from the CollaborateMD API, processes it, 
 
 ---
 
-## 👔 Executive Summary (For Stakeholders & Bosses)
+## 👔 Executive Summary (For Stakeholders & Leadership)
 
 * **Robust & Self-Healing:** The pipeline automatically adapts to changes in CSV column ordering and dynamic type variations (e.g., nullable integer formats) without throwing errors or crashing, maintaining a reliable database state.
 * **API Compliance & Protection:** Adheres strictly to CollaborateMD's execution constraints (sequential report execution per credential set) to prevent account lockout, IP throttling, or API bans.
@@ -59,3 +59,23 @@ Downloads completed report data, processes it, and imports it to PostgreSQL.
 1. **Configure (`config/config.py`):** Set API credentials, PostgreSQL connection, customer accounts, and report mappings.
 2. **Run `generate_identifiers.py`:** Initiates report generation and registers active identifiers in the database.
 3. **Run `fetch_and_load_reports.py`:** Fetches the generated reports, transforms/coerces the data types, and loads them into PostgreSQL.
+
+---
+
+## 🤖 n8n Workflow Automation
+
+An automated n8n workflow coordinates the ETL execution schedule and triggers the core scripts sequentially.
+
+* **Workflow Host:** [http://20.15.226.138/](http://20.15.226.138/)
+* **Workflow JSON Definition:** [Reporting SAS ETL.json](file:///Users/caleb/IdeaProjects/etls/combined/Reporting%20SAS%20ETL.json)
+
+### Automation Steps:
+1. **Trigger:** Daily at 3:00 AM (via Schedule Trigger) or via Manual Trigger.
+2. **Run Generate Identifiers Script:** Executes `generate_identifiers.py` to initiate report runs on the CollaborateMD API and register identifiers.
+3. **Read & Parse Identifier Summary:** Reads `latest_identifier_summary.csv` and parses the CSV into a table.
+4. **Wait 2 Minutes:** Pauses execution to allow time for the API to completely process the reports.
+5. **Run Fetch and Load Reports Script:** Executes `fetch_and_load_reports.py` to download, coerce, and load the reports into PostgreSQL.
+6. **Read & Parse Fetch Summary:** Reads `latest_fetch_summary.csv` and parses the CSV into a table.
+7. **Join Run and Fetch Summaries:** Joins the generation run and fetch run summaries on `instance_key`, `customer_account`, and `report_name` for audit visibility.
+8. **Convert Joined Table to CSV:** Saves the joined table back into a CSV file for unified monitoring.
+
