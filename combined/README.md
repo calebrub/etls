@@ -4,7 +4,7 @@ This ETL pipeline fetches report data from the CollaborateMD API, processes it, 
 
 ---
 
-## 👔 Executive Summary (For Stakeholders & Leadership)
+## Executive Summary (For Stakeholders & Leadership)
 
 * **Robust & Self-Healing:** The pipeline automatically adapts to changes in CSV column ordering and dynamic type variations (e.g., nullable integer formats) without throwing errors or crashing, maintaining a reliable database state.
 * **API Compliance & Protection:** Adheres strictly to CollaborateMD's execution constraints (sequential report execution per credential set) to prevent account lockout, IP throttling, or API bans.
@@ -12,7 +12,7 @@ This ETL pipeline fetches report data from the CollaborateMD API, processes it, 
 
 ---
 
-## 🛠️ Developer & Contributor Guide
+## Developer & Contributor Guide
 
 * **Database Schema as Source of Truth:** Rather than guessing types from dynamic CSV data, the ETL queries PostgreSQL types (`text`, `bigint`, `date`, etc.) to automatically coerce CSV column data types before importing.
 * **Adding New Reports:** When a new report is run for the first time:
@@ -36,33 +36,42 @@ CollaborateMD enforces strict concurrency limits:
 
 ---
 
-## Core Scripts
+## Core Scripts & Mechanics
 
-### 1. `generate_identifiers.py`
-Initiates report runs on CollaborateMD and records execution state.
-* Loops through reports and accounts sequentially per instance.
-* Triggers each report, polls the API until completion, and retrieves a unique `identifier`.
-* Saves the active identifier to the database `account_reports` table (deactivating old runs).
-* Parallelized across instances using Python's `ThreadPoolExecutor`.
+This section describes how the pipeline works under the hood, detailing the roles of the two main scripts.
 
-### 2. `fetch_and_load_reports.py`
-Downloads completed report data, processes it, and imports it to PostgreSQL.
-* **Parallel Fetch:** Queries active identifiers and downloads base64-encoded ZIP files from the API concurrently (up to 32 threads).
-* **Schema-Driven Coercion:** Coerces CSV column types to match existing database types (preventing type conflicts). Falls back to dynamic inference for new tables.
-* **Column Alignment:** Automatically reorders CSV columns to match the target database table's column order.
-* **Database Load:** Truncates the target tables, imports the processed data, and runs SQL post-processing views (`sql/psql-views.sql`).
+### 1. Report Generation: `generate_identifiers.py`
+This script initiates the report generation process on the CollaborateMD SOAP/REST XML API and updates the execution state in PostgreSQL.
+
+* **Sequential Execution (Per Credentials):** To adhere to CollaborateMD's strict execution constraints, the script loops through each customer account and requested report sequentially per credential set.
+* **Cross-Instance Parallelism:** If multiple entity configurations (instances) exist, the script runs them concurrently in separate threads using Python's `ThreadPoolExecutor`. This maximizes throughput without crossing the API's concurrent execution limit.
+* **API Polling & Backoff:** When a report request is sent, the API may return a status indicating the report is `"still running"`. The script automatically enters a polling loop, waiting 60 seconds before retrying.
+* **Database Tracking (`account_reports`):** Once a report runs successfully, the script extracts the unique `identifier` from the XML response. It marks any existing run for that account/report as inactive (`status = 0`) and records the new active run (`status = 1`).
+* **Audit Summaries:** After finishing all runs, execution statistics (HTTP response codes, API statuses, identifiers, and retry counts) are gathered and written to a timestamped CSV summary under `csv_files/run_summaries/latest_identifier_summary.csv`.
+
+### 2. Fetch & Load: `fetch_and_load_reports.py`
+This script retrieves the completed report data, cleans and validates the CSVs, coerces data types to match database tables, and imports the records into PostgreSQL.
+
+* **Concurrent Downloads:** The script queries the database for all active (`status = 1`) report identifiers and downloads base64-encoded ZIP payloads concurrently (up to 32 parallel threads).
+* **Extraction & Metadata Enrichment:** It base64-decodes the zip data, extracts the underlying CSV, cleans column headers into snake_case, and appends entity identifier columns (`customer_account` and `instance_key`) to each row.
+* **Strict Schema Coercion:** Instead of relying on generic type inferences that can break on empty values or varying CSV schemas, the script queries the target PostgreSQL table's structure (`information_schema.columns`). It automatically coerces CSV strings into matching database types (such as mapping date fields, handling floating decimals, or using modern nullable integer `Int64` formats).
+* **Schema Evolution & Validation:** 
+  * If a report runs for the first time, it infers the schema dynamically and creates the table.
+  * If the table already exists, it performs a pre-flight schema alignment and validation. Columns are auto-reordered to match the database order. If there's an irreconcilable structure mismatch (e.g., different column count or type differences), it halts before writing to protect the database integrity.
+* **Database Update & Views Execution:** It safely truncates target tables and performs bulk uploads using SQLAlchemy/pandas. Finally, it executes all database post-processing SQL files in the `sql/` folder (such as refreshing downstream reporting views).
+* **Audit Summaries:** Saves metadata details for all loaded tables in `csv_files/fetch_summaries/latest_fetch_summary.csv`.
 
 ---
 
 ## Execution Flow
 
 1. **Configure (`config/config.py`):** Set API credentials, PostgreSQL connection, customer accounts, and report mappings.
-2. **Run `generate_identifiers.py`:** Initiates report generation and registers active identifiers in the database.
-3. **Run `fetch_and_load_reports.py`:** Fetches the generated reports, transforms/coerces the data types, and loads them into PostgreSQL.
+2. **Run `generate_identifiers.py`:** Initiates report generation, polls the API for completion, and registers active identifiers in the database.
+3. **Run `fetch_and_load_reports.py`:** Fetches the generated reports in parallel, cleans/coerces the data types, validates schemas, and loads them into PostgreSQL, followed by post-processing views.
 
 ---
 
-## 🤖 n8n Workflow Automation
+## n8n Workflow Automation
 
 An automated n8n workflow coordinates the ETL execution schedule and triggers the core scripts sequentially.
 
@@ -70,7 +79,7 @@ An automated n8n workflow coordinates the ETL execution schedule and triggers th
 * **Workflow JSON Definition:** [Reporting SAS ETL.json](file:///Users/caleb/IdeaProjects/etls/combined/Reporting%20SAS%20ETL.json)
 
 ### Automation Steps:
-1. **Trigger:** Daily at 3:00 AM (via Schedule Trigger) or via Manual Trigger.
+1. **Trigger:** Daily at 3:00 AM Eastern Time (ET / America/New_York) (via Schedule Trigger) or via Manual Trigger.
 2. **Run Generate Identifiers Script:** Executes `generate_identifiers.py` to initiate report runs on the CollaborateMD API and register identifiers.
 3. **Read & Parse Identifier Summary:** Reads `latest_identifier_summary.csv` and parses the CSV into a table.
 4. **Wait 2 Minutes:** Pauses execution to allow time for the API to completely process the reports.
