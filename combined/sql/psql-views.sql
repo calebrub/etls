@@ -324,11 +324,14 @@ WITH ar_aging_cte AS (
 
         -- LOC
         lc.level_of_care AS loc,
+        aa.charge_amount,
 
         -- Numeric conversions
         replace(replace(aa.charge_balance_due_ins::text, '$', ''), ',', '')::numeric AS int_charge_balance_due_ins,
+        replace(replace(aa.charge_balance::text, '$', ''), ',', '')::numeric AS int_charge_balance,
         replace(replace(aa.charge_balance_due_other::text, '$', ''), ',', '')::numeric AS int_charge_balance_due_other,
         replace(replace(aa.charge_balance_due_pat::text, '$', ''), ',', '')::numeric AS int_charge_balance_due_pat,
+        replace(replace(aa.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
         aa.patient_stmts_sent_electronically::numeric AS int_patient_stmts_sent_electronically,
         aa.patient_statements_printed::numeric AS int_patient_statements_printed,
 
@@ -815,11 +818,14 @@ SELECT
         REGEXP_REPLACE(split_part(practice_name, ' ', 1), '\s+', '', 'g'),
         REGEXP_REPLACE(pnc.payer_code, '\s+', '', 'g'),
         REGEXP_REPLACE(coalesce(loc1.level_of_care, loc2.level_of_care), '\s+', '', 'g')
-    ) AS unique_id
+    ) AS unique_id,
+    COALESCE(dtc."group", 'Other') AS denial_group,
+    dtc.rcm_section
 FROM denial_trends_cte
 LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = clean_rev_code
 LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = clean_cpt_code
-LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = charge_primary_payer_name;
+LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = charge_primary_payer_name
+LEFT JOIN denial_trends_crosswalk dtc ON dtc.remittance_code = unpaid_reason_code_s;
 
 CREATE INDEX IF NOT EXISTS idx_denial_trends_account ON denial_trends_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_denial_trends_instance_key ON denial_trends_view(instance_key);
