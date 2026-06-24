@@ -249,17 +249,20 @@ def run_report_for_account(account, account_name, report_id, filter_id, report_n
     time.sleep(5)
 
 
-def generate_report_for_all_accounts(report_id, filter_id, report_name, instance_key, base_url, username, password, accounts, account_names, results_list, results_lock):
+def generate_report_for_all_accounts(report_id, filter_id, report_name, instance_key, base_url, username, password, accounts, account_names, results_list, results_lock, account_filters=None):
     """
     Iterates over all customer accounts to generate the report for each.
     """
+    filters_lookup = {f["account"]: f["filter_id"] for f in account_filters} if account_filters else {}
+
     for account in accounts:
         account_name = account_names.get(account, account)
+        resolved_filter_id = filters_lookup.get(account, filter_id)
         run_report_for_account(
             account=account,
             account_name=account_name,
             report_id=report_id,
-            filter_id=filter_id,
+            filter_id=resolved_filter_id,
             report_name=report_name,
             instance_key=instance_key,
             base_url=base_url,
@@ -356,7 +359,8 @@ def run_all_reports(max_workers=None):
                 accounts=instance_config['accounts'],
                 account_names=instance_config.get('account_names', {}),
                 results_list=results_list,
-                results_lock=results_lock
+                results_lock=results_lock,
+                account_filters=report_config.get("account_filters")
             )
 
     # Run instances concurrently

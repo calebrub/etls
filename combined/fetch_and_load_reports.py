@@ -7,6 +7,7 @@ import time
 import concurrent.futures
 import threading
 import sys
+import argparse
 
 import requests
 import logging
@@ -302,11 +303,9 @@ def collect_fetch_tasks(instance_list, instances, schema, has_instance_column):
                     'password': password
                 })
     return tasks
-
-
 def write_fetch_summary(results_list):
     """
-    Writes the run metadata and results summary to a fetch_summary CSV file.
+    Writes the run metadata and results summary to a fetch summary CSV file.
     """
     if not results_list:
         return
@@ -319,9 +318,16 @@ def write_fetch_summary(results_list):
 
     fields = [
         'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
-        'http_status', 'api_status', 'status_message',
-        'retries', 'rows_fetched', 'file_written'
+        'http_status', 'api_status', 'status_message', 'retries', 'rows_fetched', 'file_written',
+        'load_status', 'rows_inserted', 'rows_duplicate', 'load_error'
     ]
+
+    # Pre-fill defaults for items that didn't go through load phase
+    for r in results_list:
+        r.setdefault('load_status', 'SKIPPED' if r.get('file_written') == 'FALSE' else 'PENDING')
+        r.setdefault('rows_inserted', 0)
+        r.setdefault('rows_duplicate', 0)
+        r.setdefault('load_error', '')
 
     try:
         with open(csv_file, 'w', newline='', encoding='utf-8') as f:
@@ -340,7 +346,6 @@ def write_fetch_summary(results_list):
         print(f"✓ Copied latest fetch summary to: {latest_csv_file}")
     except Exception as e:
         print(f"✗ Failed to write latest summary CSV: {e}")
-
 
 def fetch_reports_to_csv():
     """
@@ -365,7 +370,7 @@ def fetch_reports_to_csv():
 
     if not tasks:
         print("No tasks to execute.")
-        return
+        return []
 
     results_list = []
     results_lock = threading.Lock()
@@ -434,8 +439,7 @@ def fetch_reports_to_csv():
         key = (result['instance_key'], result['report_name'])
         result['file_written'] = 'TRUE' if key in written_reports else 'FALSE'
 
-    # Write fetch summary CSV
-    write_fetch_summary(results_list)
+    return results_list
 
 
 def to_snake_case(name):
@@ -700,7 +704,7 @@ def validate_all_tables(engine, schema, tables):
 
         if db_struct is None:
             print(f"✓ Table {schema}.{table_name} does not exist → will be created")
-            continue
+            continue2
 
         # Check for created_at mismatch specifically
         db_cols = {col for col, _ in db_struct}
@@ -910,28 +914,155 @@ def extract_and_transform_csvs(engine, schema, csv_files):
     return tables
 
 
-def load_tables_to_db(engine, schema, tables):
+def update_results_list(results_list, instance_key, report_name, customer_account, rows_inserted=0, rows_duplicate=0, load_status='SUCCESS', load_error=None):
+    if not results_list:
+        return
+    for r in results_list:
+        if (r['instance_key'] == instance_key and 
+            r['report_name'] == report_name.upper() and 
+            str(r['customer_account']) == str(customer_account)):
+            r['rows_inserted'] = rows_inserted
+            r['rows_duplicate'] = rows_duplicate
+            r['load_status'] = load_status
+            r['load_error'] = load_error or ""
+            return
+
+
+def load_tables_to_db(engine, schema, tables, results_list=None, incremental=True):
     """
-    Safely truncates and loads the processed DataFrames into PostgreSQL.
+    Loads the processed DataFrames into PostgreSQL.
+    If incremental is True, appends only new rows that don't already exist.
+    If incremental is False, truncates and loads.
     """
     for table_name, df in tables.items():
         try:
-            truncate_table(engine, schema, table_name)
-            df.to_sql(
-                table_name,
-                engine,
-                schema=schema,
-                if_exists="append",
-                index=False
-            )
-            print(f"✓ Loaded {schema}.{table_name} ({len(df)} rows)")
+            db_struct = get_db_structure(engine, schema, table_name)
+            
+            if not incremental or db_struct is None:
+                # Full refresh or table doesn't exist yet
+                if db_struct is not None:
+                    truncate_table(engine, schema, table_name)
+                df.to_sql(
+                    table_name,
+                    engine,
+                    schema=schema,
+                    if_exists="append",
+                    index=False
+                )
+                print(f"✓ Loaded {schema}.{table_name} ({len(df)} rows)")
+                
+                # Update stats in results_list
+                if 'customer_account' in df.columns and 'instance_key' in df.columns:
+                    unique_groups = df.groupby(['instance_key', 'customer_account'])
+                    for (inst, acc), group in unique_groups:
+                        update_results_list(
+                            results_list, str(inst), table_name, str(acc),
+                            rows_inserted=len(group), rows_duplicate=0, load_status='SUCCESS'
+                        )
+            else:
+                # Incremental mode using staging table and NOT EXISTS comparison
+                staging_table = f"{table_name}_staging"
+                try:
+                    df.to_sql(
+                        staging_table,
+                        engine,
+                        schema=schema,
+                        if_exists="replace",
+                        index=False
+                    )
+                    
+                    # Compare all columns except 'created_at'
+                    compare_cols = [c for c in df.columns if c != 'created_at']
+                    where_clause = " AND ".join([f'(t."{c}" IS NOT DISTINCT FROM s."{c}")' for c in compare_cols])
+                    
+                    # Count new and duplicate rows per account
+                    new_counts = {}
+                    dup_counts = {}
+                    
+                    if 'customer_account' in df.columns and 'instance_key' in df.columns:
+                        count_new_query = f"""
+                            SELECT s.instance_key, s.customer_account, COUNT(*)
+                            FROM "{schema}"."{staging_table}" s
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM "{schema}"."{table_name}" t
+                                WHERE {where_clause}
+                            )
+                            GROUP BY s.instance_key, s.customer_account;
+                        """
+                        count_dup_query = f"""
+                            SELECT s.instance_key, s.customer_account, COUNT(*)
+                            FROM "{schema}"."{staging_table}" s
+                            WHERE EXISTS (
+                                SELECT 1 FROM "{schema}"."{table_name}" t
+                                WHERE {where_clause}
+                            )
+                            GROUP BY s.instance_key, s.customer_account;
+                        """
+                        
+                        with engine.connect() as conn:
+                            res_new = conn.execute(text(count_new_query)).fetchall()
+                            for r_new in res_new:
+                                key = (str(r_new[0]), str(r_new[1]))
+                                new_counts[key] = r_new[2]
+                                
+                            res_dup = conn.execute(text(count_dup_query)).fetchall()
+                            for r_dup in res_dup:
+                                key = (str(r_dup[0]), str(r_dup[1]))
+                                dup_counts[key] = r_dup[2]
+                    
+                    all_cols_str = ", ".join([f'"{c}"' for c in df.columns])
+                    staging_cols_str = ", ".join([f's."{c}"' for c in df.columns])
+                    
+                    insert_query = f"""
+                        INSERT INTO "{schema}"."{table_name}" ({all_cols_str})
+                        SELECT {staging_cols_str}
+                        FROM "{schema}"."{staging_table}" s
+                        WHERE NOT EXISTS (
+                            SELECT 1 
+                            FROM "{schema}"."{table_name}" t
+                            WHERE {where_clause}
+                        );
+                    """
+                    
+                    with engine.begin() as conn:
+                        result = conn.execute(text(insert_query))
+                        inserted_rows = result.rowcount
+                    print(f"✓ Incrementally loaded {schema}.{table_name}: inserted {inserted_rows} new rows (out of {len(df)} total fetched)")
+                    
+                    # Update results_list with the calculated counts
+                    if 'customer_account' in df.columns and 'instance_key' in df.columns:
+                        unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
+                        for _, row in unique_groups.iterrows():
+                            inst = str(row['instance_key'])
+                            acc = str(row['customer_account'])
+                            update_results_list(
+                                results_list, inst, table_name, acc,
+                                rows_inserted=new_counts.get((inst, acc), 0),
+                                rows_duplicate=dup_counts.get((inst, acc), 0),
+                                load_status='SUCCESS'
+                            )
+                finally:
+                    # Clean up staging table
+                    try:
+                        with engine.begin() as conn:
+                            conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                    except Exception as drop_err:
+                        print(f"⚠ Warning: failed to drop staging table {staging_table}: {drop_err}")
         except Exception as e:
             print(f"✗ Failed to load {schema}.{table_name}: {str(e)}")
+            # Mark all accounts/instances for this table as failed in results_list
+            if results_list and 'customer_account' in df.columns and 'instance_key' in df.columns:
+                unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
+                for _, row in unique_groups.iterrows():
+                    update_results_list(
+                        results_list, str(row['instance_key']), table_name, str(row['customer_account']),
+                        rows_inserted=0, rows_duplicate=0, load_status='FAILED', load_error=str(e)
+                    )
             engine.dispose()  # Close all connections
             raise
 
 
-def load_csvs_to_db():
+def load_csvs_to_db(results_list=None, incremental=True):
     schema = postgres_config['schema']
 
     engine = create_engine(
@@ -970,7 +1101,7 @@ def load_csvs_to_db():
     print("=" * 80 + "\n")
 
     # ---------- Load (safe) ----------
-    load_tables_to_db(engine, schema, tables)
+    load_tables_to_db(engine, schema, tables, results_list=results_list, incremental=incremental)
 
     run_sql_files(engine, schema)
 
@@ -984,9 +1115,27 @@ def main():
     print("STARTING ETL PIPELINE")
     print("=" * 80 + "\n")
 
-    fetch_reports_to_csv()
+    # Parse command line args
+    parser = argparse.ArgumentParser(description="Fetch and load reports ETL pipeline")
+    parser.add_argument('--full-refresh', action='store_true', help="Perform full refresh (truncate tables first)")
+    args, unknown = parser.parse_known_args()
 
-    load_csvs_to_db()
+    # Determine load strategy (default to config parameter or True if not specified)
+    config_incremental = postgres_config.get('incremental', True)
+    incremental = not args.full_refresh and config_incremental
+
+    if args.full_refresh:
+        print("⚡ FORCING FULL REFRESH (truncating tables before loading)")
+    elif not incremental:
+        print("⚡ Configured for FULL REFRESH (truncating tables before loading)")
+    else:
+        print("🔄 Running INCREMENTAL LOAD (upserting unique rows only)")
+
+    results_list = fetch_reports_to_csv()
+
+    load_csvs_to_db(results_list=results_list, incremental=incremental)
+
+    write_fetch_summary(results_list)
 
 
 if __name__ == "__main__":

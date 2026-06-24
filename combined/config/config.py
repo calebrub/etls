@@ -1,12 +1,3 @@
-# Python configuration module for enhance_health_group
-#
-# This file replaces the old INI-based `config/config.ini`.
-# - Define INSTANCES as a dict mapping instance_key -> configuration dict
-# - Each instance dict can include a "report_configs" list which is
-#   a list of {"report_id": "<id>", "name": "<name>"} mappings.
-#
-# Keep secrets out of VCS in production. Use environment variables to override
-# values via the existing ConfigLoader._get_env_override mechanism.
 
 POSTGRES = {
     'host': 'revlooppgserver.postgres.database.azure.com',
@@ -34,21 +25,37 @@ INSTANCES = {
             '10026936': 'EDEN BY ENHANCE',
             '10026716': 'EMBRACE TREATMENT, LLC',
             '10023994': 'ENHANCE HEALTH GROUP, LLC',
-            '10026559': '10026559',
+            '10026559': 'VIRTUAL TREATMENT CENTER LLC',
         },
+        # To override filter_id per customer account, add: "account_filters": [{"account": "12345", "filter_id": "67890"}]
         'report_configs': [
             {"report_id": "10078378", "filter_id": "10141925", "name": "ar_aging"},
             {"report_id": "10078486", "filter_id": "10141929", "name": "gross_billing"},
             {"report_id": "10078375", "filter_id": "10141926", "name": "charges_on_hold"},
             {"report_id": "10078446", "filter_id": "10141927", "name": "claim_stage_breakdown"},
-            {"report_id": "10078463", "filter_id": "10141928", "name": "denial_trends"},
-            {"report_id": "10078516", "filter_id": "10141930", "name": "payment_trend"},
+            {
+                "report_id": "10078463",
+                "filter_id": "10141928",
+                "name": "denial_trends",
+                "account_filters": [{"account": "10023994", "filter_id": "10147269"}] #last_12_months
+             },
+            {
+                "report_id": "10078516",
+                "filter_id": "10141930",
+                "name": "payment_trend",
+                "account_filters": [{"account": "10023994", "filter_id": "10147267"}] #last_12_months
+             },
             {"report_id": "10066805", "filter_id": "10141935", "name": "rcm_productivity"},
             {"report_id": "10078520", "filter_id": "10141934", "name": "user_time_spread"},
             {"report_id": "10078521", "filter_id": "10141933", "name": "write_off_trend"},
             {"report_id": "10078522", "filter_id": "10144452", "name": "pdr3_calculator"},
             {"report_id": "10078523", "filter_id": "10141932", "name": "rev_rec_charges"},
-            {"report_id": "10078524", "filter_id": "10141937", "name": "rev_rec_payments"}
+            {
+                "report_id": "10078524",
+                "filter_id": "10141937",
+                "name": "rev_rec_payments",
+                "account_filters": [{"account": "10023994", "filter_id": "10147270"}] #last_12_months
+            }
         ],
     },
 
@@ -65,7 +72,7 @@ INSTANCES = {
             '10034187',
             '10032876',
             '10035136',
-            '10035138',
+            # '10035138', Deactivated
             '10035139',
             # '10031999', Billing Service Account, No Data
         ],
@@ -78,7 +85,7 @@ INSTANCES = {
             '10034187': 'THE TRINITY WELLNESS GROUP',
             '10032876': 'AMITY PALM BEACH',
             '10035136': 'LIAH WELLNESS CENTER LLC',
-            '10035138': 'LIAH WELLNESS SERVICES PLLC',
+            # '10035138': 'LIAH WELLNESS SERVICES PLLC', # Deactivated
             '10035139': 'THE BRIDGES OF HOUSTON LLC',
             '10031999': 'BILLING SERVICE ACCOUNT',
         },
