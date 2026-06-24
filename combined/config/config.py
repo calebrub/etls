@@ -14,19 +14,12 @@ INSTANCES = {
         'username': 'ehgdeiapi',
         'password': '%JdI/vt5b`Vmu8/x#F9P',
         'accounts': [
-            '10028395',
-            '10026936',
-            '10026716',
-            '10023994',
-            '10026559',  # '10023851', Rebel Removed
+            {"id": "10028395", "name": "CK FAMILY THERAPY"},
+            {"id": "10026936", "name": "EDEN BY ENHANCE"},
+            {"id": "10026716", "name": "EMBRACE TREATMENT, LLC"},
+            {"id": "10023994", "name": "ENHANCE HEALTH GROUP, LLC"},
+            {"id": "10026559", "name": "VIRTUAL TREATMENT CENTER LLC"},  # '10023851', Rebel Removed
         ],
-        'account_names': {
-            '10028395': 'CK FAMILY THERAPY',
-            '10026936': 'EDEN BY ENHANCE',
-            '10026716': 'EMBRACE TREATMENT, LLC',
-            '10023994': 'ENHANCE HEALTH GROUP, LLC',
-            '10026559': 'VIRTUAL TREATMENT CENTER LLC',
-        },
         # To override filter_id per customer account, add: "account_filters": [{"account": "12345", "filter_id": "67890"}]
         'report_configs': [
             {"report_id": "10078378", "filter_id": "10141925", "name": "ar_aging"},
@@ -64,31 +57,18 @@ INSTANCES = {
         'username': 'vantagercmapi',
         'password': '_9N}TiFPE(l7xk3nH`OZ',
         'accounts': [
-            '10031998',
-            '10032271',
-            '10032272',
-            '10034661',
-            '10034812',
-            '10034187',
-            '10032876',
-            '10035136',
-            # '10035138', Deactivated
-            '10035139',
-            # '10031999', Billing Service Account, No Data
+            {"id": "10031998", "name": "1 SOLUTION WELLNESS"},
+            {"id": "10032271", "name": "AMITY SAN DIEGO"},
+            {"id": "10032272", "name": "NORTHRIDGE ADDICTION TREATMENT CENTERS"},
+            {"id": "10034661", "name": "PASSAGE TO RECOVERY"},
+            {"id": "10034812", "name": "SAN DIEGO WELLNESS"},
+            {"id": "10034187", "name": "THE TRINITY WELLNESS GROUP"},
+            {"id": "10032876", "name": "AMITY PALM BEACH"},
+            {"id": "10035136", "name": "LIAH WELLNESS CENTER LLC"},
+            # {"id": "10035138", "name": "LIAH WELLNESS SERVICES PLLC"}, # Deactivated
+            {"id": "10035139", "name": "THE BRIDGES OF HOUSTON LLC"},
+            # {"id": "10031999", "name": "BILLING SERVICE ACCOUNT"}, # Billing Service Account, No Data
         ],
-        'account_names': {
-            '10031998': '1 SOLUTION WELLNESS',
-            '10032271': 'AMITY SAN DIEGO',
-            '10032272': 'NORTHRIDGE ADDICTION TREATMENT CENTERS',
-            '10034661': 'PASSAGE TO RECOVERY',
-            '10034812': 'SAN DIEGO WELLNESS',
-            '10034187': 'THE TRINITY WELLNESS GROUP',
-            '10032876': 'AMITY PALM BEACH',
-            '10035136': 'LIAH WELLNESS CENTER LLC',
-            # '10035138': 'LIAH WELLNESS SERVICES PLLC', # Deactivated
-            '10035139': 'THE BRIDGES OF HOUSTON LLC',
-            '10031999': 'BILLING SERVICE ACCOUNT',
-        },
 
         'report_configs': [
             {"report_id": "10062054", "filter_id": "10137065", "name": "ar_aging"},

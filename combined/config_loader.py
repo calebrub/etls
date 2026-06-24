@@ -101,14 +101,29 @@ class ConfigLoader:
                 api_base = self._get_env_override(section_prefix, 'api_base_url', raw.get('api_base_url'))
                 username = self._get_env_override(section_prefix, 'username', raw.get('username'))
                 password = self._get_env_override(section_prefix, 'password', raw.get('password'))
-                accounts = raw.get('accounts', [])
+                raw_accounts = raw.get('accounts', [])
 
-                # ensure accounts is a list
-                if isinstance(accounts, str):
+                # ensure raw_accounts is a list
+                if isinstance(raw_accounts, str):
                     try:
-                        accounts = ast.literal_eval(accounts)
+                        raw_accounts = ast.literal_eval(raw_accounts)
                     except Exception:
-                        accounts = [accounts]
+                        raw_accounts = [raw_accounts]
+
+                accounts = []
+                account_names = raw.get('account_names', {}).copy()
+
+                if isinstance(raw_accounts, list):
+                    for acc in raw_accounts:
+                        if isinstance(acc, dict):
+                            acc_id = str(acc.get('id', ''))
+                            accounts.append(acc_id)
+                            if 'name' in acc:
+                                account_names[acc_id] = acc['name']
+                        else:
+                            accounts.append(str(acc))
+                else:
+                    accounts = [str(raw_accounts)]
 
                 instances[key] = {
                     'instance_key': key,
@@ -116,7 +131,7 @@ class ConfigLoader:
                     'username': username,
                     'password': password,
                     'accounts': accounts,
-                    'account_names': raw.get('account_names', {}),
+                    'account_names': account_names,
                     'report_configs': raw.get('report_configs', [])
                 }
 
