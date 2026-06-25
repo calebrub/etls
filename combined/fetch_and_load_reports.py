@@ -994,6 +994,28 @@ def ensure_row_hash_column(engine, schema, table_name):
         if not idx_result:
             print(f"  → Creating index {idx_name} on {schema}.{table_name}")
             conn.execute(text(f'CREATE INDEX "{idx_name}" ON "{schema}"."{table_name}" (row_hash)'))
+def copy_df_to_table(engine, schema, table_name, df):
+    """
+    Bulk loads a Pandas DataFrame into a PostgreSQL table using copy_expert (COPY command).
+    Extremely fast for large datasets.
+    """
+    buf = io.StringIO()
+    # Use tab delimiter to avoid comma/quote escaping issues in text columns
+    df.to_csv(buf, index=False, header=False, sep='\t', na_rep='\\N')
+    buf.seek(0)
+
+    # Double quote column names to handle case sensitivity and special chars
+    cols = ', '.join(f'"{c}"' for c in df.columns)
+    
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cur:
+            copy_sql = f'COPY "{schema}"."{table_name}" ({cols}) FROM STDIN WITH (FORMAT csv, DELIMITER E\'\\t\', NULL \'\\N\')'
+            cur.copy_expert(copy_sql, buf)
+        raw_conn.commit()
+    finally:
+        raw_conn.close()
+
 
 
 def load_tables_to_db(engine, schema, tables, results_list=None, incremental=True):
@@ -1014,22 +1036,25 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
                     truncate_table(engine, schema, table_name)
                 # Compute row_hash before inserting
                 df['row_hash'] = compute_row_hash(df)
-                df.to_sql(
-                    table_name,
-                    engine,
-                    schema=schema,
-                    if_exists="append",
-                    index=False,
-                    method='multi',
-                    chunksize=5000
-                )
+                
+                # Create table structure if it doesn't exist
+                if db_struct is None:
+                    df.head(0).to_sql(
+                        table_name,
+                        engine,
+                        schema=schema,
+                        if_exists="replace",
+                        index=False
+                    )
+                # Bulk COPY the data
+                copy_df_to_table(engine, schema, table_name, df)
+                
                 with _db_structure_cache_lock:
                     _db_structure_cache.pop((schema, table_name), None)
                 print(f"✓ Loaded {schema}.{table_name} ({len(df)} rows)")
                 
                 # Ensure index exists on row_hash for future incremental loads
-                if db_struct is not None:
-                    ensure_row_hash_column(engine, schema, table_name)
+                ensure_row_hash_column(engine, schema, table_name)
                 
                 # Update stats in results_list
                 if 'customer_account' in df.columns and 'instance_key' in df.columns:
@@ -1055,16 +1080,16 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
                         for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
                             total_counts[(str(inst), str(acc))] = len(group)
 
-                    # Write staging table
-                    df.to_sql(
+                    # Create staging table schema instantly
+                    df.head(0).to_sql(
                         staging_table,
                         engine,
                         schema=schema,
                         if_exists="replace",
-                        index=False,
-                        method='multi',
-                        chunksize=5000
+                        index=False
                     )
+                    # Bulk COPY data to staging table
+                    copy_df_to_table(engine, schema, staging_table, df)
 
                     # Create index on staging table row_hash for the anti-join
                     with engine.begin() as conn:
@@ -1174,6 +1199,28 @@ def load_csvs_to_db(results_list=None, incremental=True):
         table_name = to_snake_case(os.path.splitext(os.path.basename(csv_file))[0])
         files_by_table.setdefault(table_name, []).append(csv_file)
 
+    print("\n" + "=" * 80)
+    print("ETL VALIDATION PHASE (UPFRONT SCHEMA CHECKS)")
+    print("=" * 80 + "\n")
+
+    # Phase 1: Pre-validation of all tables to fail fast before modifying the DB
+    for table_name, table_csv_files in files_by_table.items():
+        print(f"Pre-validating schema for table: '{table_name}'...")
+        tables = extract_and_transform_csvs(engine, schema, table_csv_files)
+        if not tables or table_name not in tables:
+            continue
+        validate_all_tables(engine, schema, tables)
+        del tables
+        import gc
+        gc.collect()
+
+    print("\n✓ All table schemas pre-validated successfully! Starting database load...\n")
+
+    print("\n" + "=" * 80)
+    print("ETL LOADING PHASE (TABLE-BY-TABLE)")
+    print("=" * 80 + "\n")
+
+    # Phase 2: High-performance loading using bulk COPY
     for table_name, table_csv_files in files_by_table.items():
         print(f"\nProcessing table: '{table_name}' with {len(table_csv_files)} file(s)")
         print("-" * 50)
@@ -1183,11 +1230,7 @@ def load_csvs_to_db(results_list=None, incremental=True):
         if not tables or table_name not in tables:
             continue
             
-        # 2. Validate schema for this table
-        print(f"Validating schema for '{table_name}'...")
-        validate_all_tables(engine, schema, tables)
-        
-        # 3. Load data for this table
+        # 2. Load data for this table
         print(f"Loading data for '{table_name}'...")
         load_tables_to_db(engine, schema, tables, results_list=results_list, incremental=incremental)
         
