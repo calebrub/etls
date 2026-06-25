@@ -347,7 +347,7 @@ def write_fetch_summary(results_list):
     except Exception as e:
         print(f"✗ Failed to write latest summary CSV: {e}")
 
-def fetch_reports_to_csv():
+def fetch_reports_to_csv(max_workers=8):
     """
     Fetch reports for all instances and write to CSV files in parallel.
     Creates separate CSV files per instance if multiple instances exist.
@@ -419,7 +419,7 @@ def fetch_reports_to_csv():
                 accumulated_data[key]['rows'].extend(rows)
 
     # Run tasks concurrently
-    max_workers = min(32, max(1, len(tasks)))
+    max_workers = min(max_workers, max(1, len(tasks)))
     print(f"Fetching {len(tasks)} reports in parallel using {max_workers} threads...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1118,6 +1118,7 @@ def main():
     # Parse command line args
     parser = argparse.ArgumentParser(description="Fetch and load reports ETL pipeline")
     parser.add_argument('--full-refresh', action='store_true', help="Perform full refresh (truncate tables first)")
+    parser.add_argument('--workers', type=int, default=8, help="Number of concurrent download threads (default: 8)")
     args, unknown = parser.parse_known_args()
 
     # Determine load strategy (default to config parameter or True if not specified)
@@ -1131,7 +1132,7 @@ def main():
     else:
         print("🔄 Running INCREMENTAL LOAD (upserting unique rows only)")
 
-    results_list = fetch_reports_to_csv()
+    results_list = fetch_reports_to_csv(max_workers=args.workers)
 
     load_csvs_to_db(results_list=results_list, incremental=incremental)
 
