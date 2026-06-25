@@ -1073,7 +1073,7 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
 
                     # Single INSERT with hash-based NOT EXISTS and RETURNING clause for accurate stats
                     has_account_cols = 'customer_account' in df.columns and 'instance_key' in df.columns
-                    returning_clause = ' RETURNING s.instance_key, s.customer_account' if has_account_cols else ''
+                    returning_clause = ' RETURNING instance_key, customer_account' if has_account_cols else ''
 
                     insert_query = f"""
                         INSERT INTO "{schema}"."{table_name}" ({all_cols_str})
