@@ -818,7 +818,7 @@ def coerce_df_to_db_schema(df, db_struct):
                 
             # 3. Float / Numeric types: Coerce to float64
             elif 'double' in db_type or 'real' in db_type or 'numeric' in db_type or 'decimal' in db_type:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = pd.to_numeric(df[col], errors='coerce').astype('float64')
                 
             # 4. Date types: Parse as date
             elif 'date' == db_type:
