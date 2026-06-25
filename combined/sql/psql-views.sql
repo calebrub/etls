@@ -37,7 +37,7 @@ WITH gross_billing_cte AS (
         -- cleaned codes for LOC lookup
         ltrim(split_part(regexp_replace(gb.charge_rev_code, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(gb.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
-        replace(replace(gb.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(gb.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
         gb.claim_first_billed_date::date - EXTRACT(dow FROM gb.claim_first_billed_date::date)::integer AS first_billed_week_date,
         gb.instance_key,
         CASE
@@ -46,7 +46,7 @@ WITH gross_billing_cte AS (
         END AS claim_first_billed_date_cln,
         CASE
             WHEN gb.claim_first_billed_date IS NULL AND gb.charge_primary_payer_name NOT ILIKE 'self pay' THEN 0
-            ELSE replace(replace(gb.charge_amount::text, '$', ''), ',', '')::numeric
+            ELSE NULLIF(replace(replace(gb.charge_amount::text, '$', ''), ',', ''), '')::numeric
         END AS int_charge_amount_cln
     FROM gross_billing gb
 )
@@ -147,7 +147,7 @@ SELECT
     pt.charge_primary_payer_name AS payer_name,
     pt.primary_payer_member_id,
     pt.charge_amount,
-    replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', '')::numeric AS insurance_paid_amount,
+    NULLIF(replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric AS insurance_paid_amount,
     pt.payment_total_paid,
     pt.payment_total_applied,
     pt.charge_insurance_adjustments,
@@ -164,25 +164,25 @@ SELECT
     to_char(pt.charge_from_date::date::timestamp with time zone, 'Month') AS charge_from_month,
     to_char(pt.charge_from_date::date::timestamp with time zone, 'YYYY') AS charge_from_year,
     CASE
-        WHEN replace(replace(pt.payment_allowed_amount::text, '$', ''), ',', '')::numeric > 0 THEN 'Paid'
+        WHEN NULLIF(replace(replace(pt.payment_allowed_amount::text, '$', ''), ',', ''), '')::numeric > 0 THEN 'Paid'
         ELSE 'Not Paid'
     END AS payment_status,
-    replace(replace(pt.payment_allowed_amount::text, '$', ''), ',', '')::numeric AS int_payment_allowed_amount,
+    NULLIF(replace(replace(pt.payment_allowed_amount::text, '$', ''), ',', ''), '')::numeric AS int_payment_allowed_amount,
     coalesce(loc1.level_of_care, loc2.level_of_care) AS level_of_care,
     CASE
-        WHEN replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', '')::numeric > 0 THEN true
+        WHEN NULLIF(replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric > 0 THEN true
         ELSE false
     END AS has_insurance_payment,
-    replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', '')::numeric AS int_insurance_paid_amount,
+    NULLIF(replace(replace(pt.insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric AS int_insurance_paid_amount,
     initcap(to_char(pt.payment_received::date::timestamp with time zone, 'day')) AS payment_received_day,
     'Week' || to_char(pt.payment_received::date::timestamp with time zone, 'IW') AS payment_received_week,
     to_char(pt.payment_received::date::timestamp with time zone, 'Month') AS payment_received_month,
     to_char(pt.payment_received::date::timestamp with time zone, 'YYYY') AS payment_received_year,
     pt.payment_received::date - pt.payment_entered::date AS payment_posting_tat,
-    replace(replace(pt.patient_applied_amount::text, '$', ''), ',', '')::numeric AS int_payment_applied_amount,
-    replace(replace(pt.payment_total_applied::text, '$', ''), ',', '')::numeric AS int_payment_total_applied,
-    replace(replace(pt.payment_total_paid::text, '$', ''), ',', '')::numeric AS int_payment_total_paid,
-    replace(replace(pt.payment_unapplied_amount::text, '$', ''), ',', '')::numeric AS int_payment_unapplied_amount,
+    NULLIF(replace(replace(pt.patient_applied_amount::text, '$', ''), ',', ''), '')::numeric AS int_payment_applied_amount,
+    NULLIF(replace(replace(pt.payment_total_applied::text, '$', ''), ',', ''), '')::numeric AS int_payment_total_applied,
+    NULLIF(replace(replace(pt.payment_total_paid::text, '$', ''), ',', ''), '')::numeric AS int_payment_total_paid,
+    NULLIF(replace(replace(pt.payment_unapplied_amount::text, '$', ''), ',', ''), '')::numeric AS int_payment_unapplied_amount,
     pnc.payer_code AS payer_class,
     instance_key
 FROM payment_trend pt
@@ -227,7 +227,7 @@ WITH charges_on_hold_cte AS (
         -- derived fields
         coh.charge_entered_date::date AS date_charge_entered,
         (NOW() AT TIME ZONE 'MST')::date - coh.charge_entered_date::date AS days_on_hold,
-        replace(replace(coh.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(coh.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
         coh.charge_primary_payer_name
     FROM charges_on_hold coh
 )
@@ -327,11 +327,11 @@ WITH ar_aging_cte AS (
         aa.charge_amount,
 
         -- Numeric conversions
-        replace(replace(aa.charge_balance_due_ins::text, '$', ''), ',', '')::numeric AS int_charge_balance_due_ins,
-        replace(replace(aa.charge_balance::text, '$', ''), ',', '')::numeric AS int_charge_balance,
-        replace(replace(aa.charge_balance_due_other::text, '$', ''), ',', '')::numeric AS int_charge_balance_due_other,
-        replace(replace(aa.charge_balance_due_pat::text, '$', ''), ',', '')::numeric AS int_charge_balance_due_pat,
-        replace(replace(aa.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(aa.charge_balance_due_ins::text, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_ins,
+        NULLIF(replace(replace(aa.charge_balance::text, '$', ''), ',', ''), '')::numeric AS int_charge_balance,
+        NULLIF(replace(replace(aa.charge_balance_due_other::text, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_other,
+        NULLIF(replace(replace(aa.charge_balance_due_pat::text, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_pat,
+        NULLIF(replace(replace(aa.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
         aa.patient_stmts_sent_electronically::numeric AS int_patient_stmts_sent_electronically,
         aa.patient_statements_printed::numeric AS int_patient_statements_printed,
 
@@ -424,16 +424,16 @@ WITH base AS (
         split_part(p.practice_name, ' ', 1) AS location_code,
 
         -- 2. Clean numeric fields
-        replace(replace(p.insurance_paid_amount, '$', ''), ',', '')::numeric AS int_insurance_paid_amount,
-        replace(replace(p.patient_paid_amount_w_copays, '$', ''), ',', '')::numeric AS int_patient_paid_amount,
-        replace(replace(p.charge_balance_due_ins, '$', ''), ',', '')::numeric AS int_charge_balance_due_ins,
-        replace(replace(p.charge_balance_due_pat, '$', ''), ',', '')::numeric AS int_charge_balance_due_pat,
-        replace(replace(p.charge_balance_at_collections, '$', ''), ',', '')::numeric AS int_charge_balance_at_collections,
+        NULLIF(replace(replace(p.insurance_paid_amount, '$', ''), ',', ''), '')::numeric AS int_insurance_paid_amount,
+        NULLIF(replace(replace(p.patient_paid_amount_w_copays, '$', ''), ',', ''), '')::numeric AS int_patient_paid_amount,
+        NULLIF(replace(replace(p.charge_balance_due_ins, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_ins,
+        NULLIF(replace(replace(p.charge_balance_due_pat, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_pat,
+        NULLIF(replace(replace(p.charge_balance_at_collections, '$', ''), ',', ''), '')::numeric AS int_charge_balance_at_collections,
 
         -- 3. Total Payment Received
         (
-            COALESCE(replace(replace(p.insurance_paid_amount, '$', ''), ',', '')::numeric, 0) +
-            COALESCE(replace(replace(p.patient_paid_amount_w_copays, '$', ''), ',', '')::numeric, 0)
+            COALESCE(NULLIF(replace(replace(p.insurance_paid_amount, '$', ''), ',', ''), '')::numeric, 0) +
+            COALESCE(NULLIF(replace(replace(p.patient_paid_amount_w_copays, '$', ''), ',', ''), '')::numeric, 0)
         ) AS total_payment_received
 
     FROM pdr3_calculator p
@@ -494,7 +494,7 @@ SELECT
     primary_member_id,
     credit_payer_name,
     payer_class,
-    replace(replace(insurance_paid_amount::text, '$', ''), ',', '')::numeric as insurance_paid_amount,
+    NULLIF(replace(replace(insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric as insurance_paid_amount,
     patient_paid_amount_w_copays,
     total_payment_received,
     payment_received,
@@ -621,7 +621,7 @@ WITH base AS (
         rrc.created_at,
         ltrim(split_part(regexp_replace(rrc.charge_rev_code::text, '\.0$', ''), ' ', 1), '0')        AS clean_rev_code,
         ltrim(split_part(regexp_replace(rrc.charge_cpt_code::text, '\.0$', ''), ' ', 1), '0')        AS clean_cpt_code,
-        replace(replace(rrc.charge_amount::text, '$', ''), ',', '')::numeric                         AS int_charge_amount,
+        NULLIF(replace(replace(rrc.charge_amount::text, '$', ''), ',', ''), '')::numeric                         AS int_charge_amount,
         to_char(rrc.claim_first_billed_date::date::timestamptz, 'day')                               AS claim_first_billed_day,
         'Week' || to_char(rrc.claim_first_billed_date::date::timestamptz, 'IW')                      AS claim_first_billed_week,
         to_char(rrc.claim_first_billed_date::date::timestamptz, 'Month')                             AS claim_first_billed_month,
@@ -689,9 +689,9 @@ WITH rev_rec_payments_cte AS (
         -- cleaned codes for LOC lookup
         ltrim(split_part(regexp_replace(rrp.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(rrp.charge_cpt_code::text, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
-        replace(replace(rrp.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
-        replace(replace(rrp.payment_allowed_amount::text, '$', ''), ',', '')::numeric AS int_payment_allowed_amount,
-        replace(replace(rrp.payment_total_paid::text, '$', ''), ',', '')::numeric AS int_payment_total_paid,
+        NULLIF(replace(replace(rrp.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(rrp.payment_allowed_amount::text, '$', ''), ',', ''), '')::numeric AS int_payment_allowed_amount,
+        NULLIF(replace(replace(rrp.payment_total_paid::text, '$', ''), ',', ''), '')::numeric AS int_payment_total_paid,
         to_char(rrp.payment_received::date::timestamp with time zone, 'day') AS payment_received_day,
         'Week' || to_char(rrp.payment_received::date::timestamp with time zone, 'IW') AS payment_received_week,
         to_char(rrp.payment_received::date::timestamp with time zone, 'Month') AS payment_received_month,
@@ -759,8 +759,8 @@ WITH denial_trends_cte AS (
         ltrim(split_part(regexp_replace(dt.charge_rev_code, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(dt.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         -- numeric cleaning
-        replace(replace(dt.charge_amount::text, '$', ''), ',', '')::numeric AS int_charge_amount,
-        replace(replace(dt.insurance_paid_amount::text, '$', ''), ',', '')::numeric AS int_insurance_paid_amount,
+        NULLIF(replace(replace(dt.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(dt.insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric AS int_insurance_paid_amount,
         -- date calculations
         (NOW() AT TIME ZONE 'MST')::date - dt.charge_entered_date::date AS days_on_hold,
         to_char(dt.payment_received::date::timestamp with time zone, 'day') AS payment_received_day,
@@ -861,12 +861,12 @@ WITH claim_stage_cte AS (
         ltrim(split_part(regexp_replace(csb.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(csb.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         -- numeric cleaning for currency
-        replace(replace(csb.charge_amount, '$', ''), ',', '')::numeric AS int_charge_amount,
-        replace(replace(csb.charge_balance, '$', ''), ',', '')::numeric AS int_charge_balance,
-        replace(replace(csb.charge_balance_due_ins, '$', ''), ',', '')::numeric AS int_charge_balance_due_ins,
-        replace(replace(csb.charge_balance_due_other, '$', ''), ',', '')::numeric AS int_charge_balance_due_other,
-        replace(replace(csb.charge_balance_due_pat, '$', ''), ',', '')::numeric AS int_charge_balance_due_pat,
-        replace(replace(csb.charge_balance_at_collections, '$', ''), ',', '')::numeric AS int_charge_balance_at_collections,
+        NULLIF(replace(replace(csb.charge_amount, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(csb.charge_balance, '$', ''), ',', ''), '')::numeric AS int_charge_balance,
+        NULLIF(replace(replace(csb.charge_balance_due_ins, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_ins,
+        NULLIF(replace(replace(csb.charge_balance_due_other, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_other,
+        NULLIF(replace(replace(csb.charge_balance_due_pat, '$', ''), ',', ''), '')::numeric AS int_charge_balance_due_pat,
+        NULLIF(replace(replace(csb.charge_balance_at_collections, '$', ''), ',', ''), '')::numeric AS int_charge_balance_at_collections,
         -- date logic
         (NOW() AT TIME ZONE 'MST')::date - csb.charge_entered_date::date AS days_on_hold,
         to_char(csb.charge_entered_date::date::timestamp with time zone, 'day') AS charge_entered_day,
@@ -944,18 +944,18 @@ WITH qp_cte AS (
         ltrim(split_part(regexp_replace(qp.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(qp.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         -- numeric cleaning
-        replace(replace(qp.payment_allowed_amount, '$', ''), ',', '')::numeric AS int_payment_allowed_amount,
-        replace(replace(qp.charge_amount, '$', ''), ',', '')::numeric AS int_charge_amount,
-        replace(replace(qp.insurance_paid_amount, '$', ''), ',', '')::numeric AS int_insurance_paid_amount,
-        replace(replace(qp.payment_total_paid, '$', ''), ',', '')::numeric AS int_payment_total_paid,
-        replace(replace(qp.payment_total_applied, '$', ''), ',', '')::numeric AS int_payment_total_applied,
-        replace(replace(qp.charge_insurance_adjustments, '$', ''), ',', '')::numeric AS int_charge_insurance_adjustments,
-        replace(replace(qp.charge_patient_adjustments, '$', ''), ',', '')::numeric AS int_charge_patient_adjustments,
-        replace(replace(qp.charge_total_adjustments, '$', ''), ',', '')::numeric AS int_charge_total_adjustments,
-        replace(replace(qp.insurance_applied_amount, '$', ''), ',', '')::numeric AS int_insurance_applied_amount,
-        replace(replace(qp.patient_applied_amount, '$', ''), ',', '')::numeric AS int_patient_applied_amount,
-        replace(replace(qp.payment_applied_amount, '$', ''), ',', '')::numeric AS int_payment_applied_amount,
-        replace(replace(qp.payment_unapplied_amount, '$', ''), ',', '')::numeric AS int_payment_unapplied_amount,
+        NULLIF(replace(replace(qp.payment_allowed_amount, '$', ''), ',', ''), '')::numeric AS int_payment_allowed_amount,
+        NULLIF(replace(replace(qp.charge_amount, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
+        NULLIF(replace(replace(qp.insurance_paid_amount, '$', ''), ',', ''), '')::numeric AS int_insurance_paid_amount,
+        NULLIF(replace(replace(qp.payment_total_paid, '$', ''), ',', ''), '')::numeric AS int_payment_total_paid,
+        NULLIF(replace(replace(qp.payment_total_applied, '$', ''), ',', ''), '')::numeric AS int_payment_total_applied,
+        NULLIF(replace(replace(qp.charge_insurance_adjustments, '$', ''), ',', ''), '')::numeric AS int_charge_insurance_adjustments,
+        NULLIF(replace(replace(qp.charge_patient_adjustments, '$', ''), ',', ''), '')::numeric AS int_charge_patient_adjustments,
+        NULLIF(replace(replace(qp.charge_total_adjustments, '$', ''), ',', ''), '')::numeric AS int_charge_total_adjustments,
+        NULLIF(replace(replace(qp.insurance_applied_amount, '$', ''), ',', ''), '')::numeric AS int_insurance_applied_amount,
+        NULLIF(replace(replace(qp.patient_applied_amount, '$', ''), ',', ''), '')::numeric AS int_patient_applied_amount,
+        NULLIF(replace(replace(qp.payment_applied_amount, '$', ''), ',', ''), '')::numeric AS int_payment_applied_amount,
+        NULLIF(replace(replace(qp.payment_unapplied_amount, '$', ''), ',', ''), '')::numeric AS int_payment_unapplied_amount,
         -- date dimensions
         (NOW() AT TIME ZONE 'MST')::date - qp.charge_entered_date::date AS days_on_hold,
         to_char(qp.payment_received::date::timestamp with time zone, 'day') AS payment_received_day,
@@ -1115,11 +1115,11 @@ WITH wot_cte AS (
         wot.payment_payer_id::varchar AS payment_payer_id,
         wot.created_at,
         -- numeric cleaning for currency
-        replace(replace(wot.patient_total_credits, '$', ''), ',', '')::numeric AS int_patient_total_credits,
-        replace(replace(wot.payment_total_applied, '$', ''), ',', '')::numeric AS int_payment_total_applied,
-        replace(replace(wot.patient_ins_credits, '$', ''), ',', '')::numeric AS int_patient_ins_credits,
-        replace(replace(wot.patient_credits, '$', ''), ',', '')::numeric AS int_patient_credits,
-        replace(replace(wot.patient_total_credits_1, '$', ''), ',', '')::numeric AS int_patient_total_credits_1,
+        NULLIF(replace(replace(wot.patient_total_credits, '$', ''), ',', ''), '')::numeric AS int_patient_total_credits,
+        NULLIF(replace(replace(wot.payment_total_applied, '$', ''), ',', ''), '')::numeric AS int_payment_total_applied,
+        NULLIF(replace(replace(wot.patient_ins_credits, '$', ''), ',', ''), '')::numeric AS int_patient_ins_credits,
+        NULLIF(replace(replace(wot.patient_credits, '$', ''), ',', ''), '')::numeric AS int_patient_credits,
+        NULLIF(replace(replace(wot.patient_total_credits_1, '$', ''), ',', ''), '')::numeric AS int_patient_total_credits_1,
         -- date logic
         (NOW() AT TIME ZONE 'MST')::date - wot.charge_entered_date::date AS days_on_hold,
         to_char(wot.payment_received::date::timestamp with time zone, 'day') AS payment_received_day,
