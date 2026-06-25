@@ -1212,7 +1212,7 @@ def main():
     # Parse command line args
     parser = argparse.ArgumentParser(description="Fetch and load reports ETL pipeline")
     parser.add_argument('--full-refresh', action='store_true', help="Perform full refresh (truncate tables first)")
-    parser.add_argument('--workers', type=int, default=8, help="Number of concurrent download threads (default: 8)")
+    parser.add_argument('--workers', type=int, default=24, help="Number of concurrent download threads (default: 24)")
     args, unknown = parser.parse_known_args()
 
     # Determine load strategy (default to config parameter or True if not specified)
