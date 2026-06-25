@@ -999,9 +999,6 @@ def copy_df_to_table(engine, schema, table_name, df):
     Bulk loads a Pandas DataFrame into a PostgreSQL table using copy_expert (COPY command).
     Extremely fast for large datasets.
     """
-    # Replace empty strings with None so they are written as \N and loaded as NULL
-    df = df.replace('', None)
-
     buf = io.StringIO()
     # Use tab delimiter to avoid comma/quote escaping issues in text columns
     df.to_csv(buf, index=False, header=False, sep='\t', na_rep='\\N')
