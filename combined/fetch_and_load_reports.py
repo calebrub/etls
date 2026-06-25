@@ -1,4 +1,5 @@
 import os
+import hashlib
 import io
 import zipfile
 import base64
@@ -243,9 +244,22 @@ def fetch_report_data_for_customer(base_url, username, password, customer_id, cu
     return None, None, http_status, api_status, status_message, retries
 
 
+csv_write_locks = {}
+csv_write_locks_lock = threading.Lock()
+_initialized_files = set()
+_initialized_files_lock = threading.Lock()
+_written_reports = set()
+_written_reports_lock = threading.Lock()
+
+def get_csv_write_lock(file_path):
+    with csv_write_locks_lock:
+        if file_path not in csv_write_locks:
+            csv_write_locks[file_path] = threading.Lock()
+        return csv_write_locks[file_path]
+
 def write_report_to_csv(csv_dir, instance_key, report_name, headers, rows, instance_count):
     """
-    Writes the aggregated report rows to a CSV file.
+    Writes or appends report rows to a CSV file in a thread-safe manner.
     Creates subdirectories for isolation if multiple instances exist.
     """
     if instance_count > 1:
@@ -255,12 +269,22 @@ def write_report_to_csv(csv_dir, instance_key, report_name, headers, rows, insta
     else:
         file_path = os.path.join(csv_dir, f"{report_name}.csv")
 
-    with open(file_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerow(headers)
-        writer.writerows(rows)
-    logging.info(f"CSV file written: {file_path}")
-    print(f"✓ Fetched {report_name}: {len(rows)} rows from {len([r for r in rows if r[0]])}")
+    lock = get_csv_write_lock(file_path)
+    with lock:
+        with _initialized_files_lock:
+            initialized = file_path in _initialized_files
+            if not initialized:
+                _initialized_files.add(file_path)
+
+        mode = 'a' if initialized else 'w'
+        with open(file_path, mode, newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not initialized:
+                writer.writerow(headers)
+            writer.writerows(rows)
+
+    logging.info(f"CSV file {'appended' if initialized else 'written'}: {file_path}")
+    print(f"✓ Fetched {report_name}: {len(rows)} rows from {len([r for r in rows if r[0]])} (appended for {instance_key})")
 
 
 def collect_fetch_tasks(instance_list, instances, schema, has_instance_column):
@@ -375,8 +399,11 @@ def fetch_reports_to_csv(max_workers=8):
     results_list = []
     results_lock = threading.Lock()
 
-    accumulated_data = {}
-    accumulated_lock = threading.Lock()
+    # Clear tracking structures for this fetch run
+    with _initialized_files_lock:
+        _initialized_files.clear()
+    with _written_reports_lock:
+        _written_reports.clear()
 
     def worker(task):
         instance_key = task['instance_key']
@@ -410,13 +437,10 @@ def fetch_reports_to_csv(max_workers=8):
             })
 
         if rows:
-            with accumulated_lock:
-                key = (instance_key, report_name)
-                if key not in accumulated_data:
-                    accumulated_data[key] = {'headers': None, 'rows': []}
-                if accumulated_data[key]['headers'] is None and headers:
-                    accumulated_data[key]['headers'] = ['customer_account', 'instance_key'] + headers
-                accumulated_data[key]['rows'].extend(rows)
+            full_headers = ['customer_account', 'instance_key'] + headers if headers else []
+            write_report_to_csv(csv_dir, instance_key, report_name, full_headers, rows, len(instance_list))
+            with _written_reports_lock:
+                _written_reports.add((instance_key, report_name.upper()))
 
     # Run tasks concurrently
     max_workers = min(max_workers, max(1, len(tasks)))
@@ -425,19 +449,11 @@ def fetch_reports_to_csv(max_workers=8):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         executor.map(worker, tasks)
 
-    # Write CSV files
-    written_reports = set()
-    for (instance_key, report_name), data in accumulated_data.items():
-        if data['rows'] and data['headers']:
-            write_report_to_csv(csv_dir, instance_key, report_name, data['headers'], data['rows'], len(instance_list))
-            written_reports.add((instance_key, report_name.upper()))
-        else:
-            print(f"⊘ No data for report: {report_name}")
-
     # Update file_written status in results_list
-    for result in results_list:
-        key = (result['instance_key'], result['report_name'])
-        result['file_written'] = 'TRUE' if key in written_reports else 'FALSE'
+    with _written_reports_lock:
+        for result in results_list:
+            key = (result['instance_key'], result['report_name'])
+            result['file_written'] = 'TRUE' if key in _written_reports else 'FALSE'
 
     return results_list
 
@@ -452,11 +468,19 @@ def to_snake_case(name):
 
 # ---------- Helpers ----------
 
+_db_structure_cache = {}
+_db_structure_cache_lock = threading.Lock()
+
 def get_db_structure(engine, schema, table_name):
     """
     Returns a list of (column_name, data_type) for a table.
     Returns None if the table does not exist.
     """
+    cache_key = (schema, table_name)
+    with _db_structure_cache_lock:
+        if cache_key in _db_structure_cache:
+            return _db_structure_cache[cache_key]
+
     query = """
             SELECT column_name, data_type
             FROM information_schema.columns
@@ -470,10 +494,14 @@ def get_db_structure(engine, schema, table_name):
             {"schema": schema, "table": table_name}
         ).fetchall()
 
-    if not rows:
-        return None
+    result = None
+    if rows:
+        result = [(r.column_name, r.data_type) for r in rows]
 
-    return [(r.column_name, r.data_type) for r in rows]
+    with _db_structure_cache_lock:
+        _db_structure_cache[cache_key] = result
+
+    return result
 
 
 def promote_numeric_columns(df):
@@ -518,7 +546,7 @@ def promote_numeric_columns(df):
                     df[col][non_null_original]
                     .astype(str)
                     .str.strip()
-                    .apply(lambda v: bool(leading_zero_re.match(v)))
+                    .str.match(r'^0\d')
                     .any()
                 )
                 if not has_leading_zero:
@@ -622,8 +650,15 @@ def infer_df_structure(df):
         is_date_only = False
         non_null = df[col].dropna()
         if len(non_null) > 0:
+            # Check a small sample first (fast path)
+            sample = non_null.head(100)
             try:
-                is_date_only = non_null.apply(lambda v: isinstance(v, date) and not isinstance(v, datetime)).all()
+                sample_ok = all(isinstance(v, date) and not isinstance(v, datetime) for v in sample)
+                if sample_ok:
+                    if len(non_null) <= 100:
+                        is_date_only = True
+                    else:
+                        is_date_only = non_null.apply(lambda v: isinstance(v, date) and not isinstance(v, datetime)).all()
             except Exception:
                 is_date_only = False
 
@@ -666,19 +701,7 @@ def run_sql_files(engine, schema, sql_folder='sql'):
             sql = f"SET search_path TO {schema};\n" + sql
 
             with engine.begin() as conn:
-                for statement in sql.split(';'):
-                    stmt = statement.strip()
-                    if stmt:
-                        # Check if statement is just comments to avoid empty query error
-                        is_comment_only = True
-                        for line in stmt.splitlines():
-                            stripped_line = line.strip()
-                            if stripped_line and not stripped_line.startswith('--'):
-                                is_comment_only = False
-                                break
-
-                        if not is_comment_only:
-                            conn.execute(text(stmt))
+                conn.execute(text(sql))
 
             print(f"✓ Successfully executed: {os.path.basename(sql_file)}")
 
@@ -926,6 +949,47 @@ def update_results_list(results_list, instance_key, report_name, customer_accoun
             r['load_status'] = load_status
             r['load_error'] = load_error or ""
             return
+def compute_row_hash(df, exclude_cols=None):
+    """
+    Compute an MD5 hash for each row based on all columns except those in exclude_cols.
+    Returns a Series of hex digest strings.
+    """
+    if exclude_cols is None:
+        exclude_cols = {'created_at', 'row_hash'}
+    cols = [c for c in df.columns if c not in exclude_cols]
+    # Convert each row to a pipe-delimited string, then hash
+    str_df = df[cols].astype(str)
+    combined = str_df.apply(lambda row: '|'.join(row), axis=1)
+    return combined.apply(lambda v: hashlib.md5(v.encode('utf-8')).hexdigest())
+
+
+def ensure_row_hash_column(engine, schema, table_name):
+    """
+    Ensure the target table has a row_hash column with an index.
+    Adds the column and index if they don't exist.
+    """
+    with engine.begin() as conn:
+        # Check if column exists
+        result = conn.execute(text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = :schema AND table_name = :table AND column_name = 'row_hash'"
+        ), {"schema": schema, "table": table_name}).fetchone()
+
+        if not result:
+            print(f"  → Adding 'row_hash' column to {schema}.{table_name}")
+            conn.execute(text(f'ALTER TABLE "{schema}"."{table_name}" ADD COLUMN row_hash TEXT'))
+            with _db_structure_cache_lock:
+                _db_structure_cache.pop((schema, table_name), None)
+
+        # Check if index exists
+        idx_name = f"idx_{table_name}_row_hash"
+        idx_result = conn.execute(text(
+            "SELECT 1 FROM pg_indexes WHERE schemaname = :schema AND indexname = :idx"
+        ), {"schema": schema, "idx": idx_name}).fetchone()
+
+        if not idx_result:
+            print(f"  → Creating index {idx_name} on {schema}.{table_name}")
+            conn.execute(text(f'CREATE INDEX "{idx_name}" ON "{schema}"."{table_name}" (row_hash)'))
 
 
 def load_tables_to_db(engine, schema, tables, results_list=None, incremental=True):
@@ -936,20 +1000,32 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
     """
     for table_name, df in tables.items():
         try:
+            with _db_structure_cache_lock:
+                _db_structure_cache.pop((schema, table_name), None)
             db_struct = get_db_structure(engine, schema, table_name)
             
             if not incremental or db_struct is None:
                 # Full refresh or table doesn't exist yet
                 if db_struct is not None:
                     truncate_table(engine, schema, table_name)
+                # Compute row_hash before inserting
+                df['row_hash'] = compute_row_hash(df)
                 df.to_sql(
                     table_name,
                     engine,
                     schema=schema,
                     if_exists="append",
-                    index=False
+                    index=False,
+                    method='multi',
+                    chunksize=5000
                 )
+                with _db_structure_cache_lock:
+                    _db_structure_cache.pop((schema, table_name), None)
                 print(f"✓ Loaded {schema}.{table_name} ({len(df)} rows)")
+                
+                # Ensure index exists on row_hash for future incremental loads
+                if db_struct is not None:
+                    ensure_row_hash_column(engine, schema, table_name)
                 
                 # Update stats in results_list
                 if 'customer_account' in df.columns and 'instance_key' in df.columns:
@@ -960,85 +1036,86 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
                             rows_inserted=len(group), rows_duplicate=0, load_status='SUCCESS'
                         )
             else:
-                # Incremental mode using staging table and NOT EXISTS comparison
+                # Incremental mode using row_hash for fast comparison
                 staging_table = f"{table_name}_staging"
                 try:
+                    # Ensure target table has row_hash column + index
+                    ensure_row_hash_column(engine, schema, table_name)
+
+                    # Compute row_hash for the staging data
+                    df['row_hash'] = compute_row_hash(df)
+
+                    # Count total staged rows per account (before insert)
+                    total_counts = {}
+                    if 'customer_account' in df.columns and 'instance_key' in df.columns:
+                        for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
+                            total_counts[(str(inst), str(acc))] = len(group)
+
+                    # Write staging table
                     df.to_sql(
                         staging_table,
                         engine,
                         schema=schema,
                         if_exists="replace",
-                        index=False
+                        index=False,
+                        method='multi',
+                        chunksize=5000
                     )
-                    
-                    # Compare all columns except 'created_at'
-                    compare_cols = [c for c in df.columns if c != 'created_at']
-                    where_clause = " AND ".join([f'(t."{c}" IS NOT DISTINCT FROM s."{c}")' for c in compare_cols])
-                    
-                    # Count new and duplicate rows per account
-                    new_counts = {}
-                    dup_counts = {}
-                    
-                    if 'customer_account' in df.columns and 'instance_key' in df.columns:
-                        count_new_query = f"""
-                            SELECT s.instance_key, s.customer_account, COUNT(*)
-                            FROM "{schema}"."{staging_table}" s
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM "{schema}"."{table_name}" t
-                                WHERE {where_clause}
-                            )
-                            GROUP BY s.instance_key, s.customer_account;
-                        """
-                        count_dup_query = f"""
-                            SELECT s.instance_key, s.customer_account, COUNT(*)
-                            FROM "{schema}"."{staging_table}" s
-                            WHERE EXISTS (
-                                SELECT 1 FROM "{schema}"."{table_name}" t
-                                WHERE {where_clause}
-                            )
-                            GROUP BY s.instance_key, s.customer_account;
-                        """
-                        
-                        with engine.connect() as conn:
-                            res_new = conn.execute(text(count_new_query)).fetchall()
-                            for r_new in res_new:
-                                key = (str(r_new[0]), str(r_new[1]))
-                                new_counts[key] = r_new[2]
-                                
-                            res_dup = conn.execute(text(count_dup_query)).fetchall()
-                            for r_dup in res_dup:
-                                key = (str(r_dup[0]), str(r_dup[1]))
-                                dup_counts[key] = r_dup[2]
-                    
-                    all_cols_str = ", ".join([f'"{c}"' for c in df.columns])
-                    staging_cols_str = ", ".join([f's."{c}"' for c in df.columns])
-                    
+
+                    # Create index on staging table row_hash for the anti-join
+                    with engine.begin() as conn:
+                        conn.execute(text(f'CREATE INDEX ON "{schema}"."{staging_table}" (row_hash)'))
+
+                    # Build column list (excluding row_hash for the final insert into target)
+                    insert_cols = [c for c in df.columns if c != 'row_hash']
+                    all_cols_str = ", ".join([f'"{c}"' for c in insert_cols]) + ', "row_hash"'
+                    staging_cols_str = ", ".join([f's."{c}"' for c in insert_cols]) + ', s."row_hash"'
+
+                    # Single INSERT with hash-based NOT EXISTS and RETURNING clause for accurate stats
+                    has_account_cols = 'customer_account' in df.columns and 'instance_key' in df.columns
+                    returning_clause = ' RETURNING s.instance_key, s.customer_account' if has_account_cols else ''
+
                     insert_query = f"""
                         INSERT INTO "{schema}"."{table_name}" ({all_cols_str})
                         SELECT {staging_cols_str}
                         FROM "{schema}"."{staging_table}" s
                         WHERE NOT EXISTS (
-                            SELECT 1 
+                            SELECT 1
                             FROM "{schema}"."{table_name}" t
-                            WHERE {where_clause}
-                        );
+                            WHERE t.row_hash = s.row_hash
+                        ){returning_clause};
                     """
-                    
+
+                    new_counts = {}
                     with engine.begin() as conn:
                         result = conn.execute(text(insert_query))
-                        inserted_rows = result.rowcount
-                    print(f"✓ Incrementally loaded {schema}.{table_name}: inserted {inserted_rows} new rows (out of {len(df)} total fetched)")
-                    
-                    # Update results_list with the calculated counts
-                    if 'customer_account' in df.columns and 'instance_key' in df.columns:
+                        if has_account_cols:
+                            returned_rows = result.fetchall()
+                            inserted_rows = len(returned_rows)
+                            for r in returned_rows:
+                                key = (str(r[0]), str(r[1]))
+                                new_counts[key] = new_counts.get(key, 0) + 1
+                        else:
+                            inserted_rows = result.rowcount
+
+                    duplicate_rows = len(df) - inserted_rows
+                    print(f"✓ Incrementally loaded {schema}.{table_name}: "
+                          f"inserted {inserted_rows} new rows, "
+                          f"{duplicate_rows} duplicates skipped "
+                          f"(out of {len(df)} total fetched)")
+
+                    # Update results_list with accurate counts
+                    if has_account_cols:
                         unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
                         for _, row in unique_groups.iterrows():
                             inst = str(row['instance_key'])
                             acc = str(row['customer_account'])
+                            total = total_counts.get((inst, acc), 0)
+                            inserted = new_counts.get((inst, acc), 0)
                             update_results_list(
                                 results_list, inst, table_name, acc,
-                                rows_inserted=new_counts.get((inst, acc), 0),
-                                rows_duplicate=dup_counts.get((inst, acc), 0),
+                                rows_inserted=inserted,
+                                rows_duplicate=max(0, total - inserted),
                                 load_status='SUCCESS'
                             )
                 finally:
