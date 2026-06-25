@@ -1083,31 +1083,44 @@ def load_csvs_to_db(results_list=None, incremental=True):
         csv_files = glob.glob("csv_files/*.csv")
 
     print("\n" + "=" * 80)
-    print("EXTRACT & TRANSFORM PHASE")
+    print("ETL PROCESSING PHASE (TABLE-BY-TABLE)")
     print("=" * 80 + "\n")
-    print("csv_files", csv_files)
-    
-    tables = extract_and_transform_csvs(engine, schema, csv_files)
+    print(f"Found {len(csv_files)} CSV file(s) to process.")
 
-    print("\n" + "=" * 80)
-    print("VALIDATION PHASE")
-    print("=" * 80 + "\n")
+    # Group CSV files by table name
+    files_by_table = {}
+    for csv_file in csv_files:
+        table_name = to_snake_case(os.path.splitext(os.path.basename(csv_file))[0])
+        files_by_table.setdefault(table_name, []).append(csv_file)
 
-    # ---------- Pre-flight schema validation (STRICT) ----------
-    validate_all_tables(engine, schema, tables)
-
-    print("\n" + "=" * 80)
-    print("LOAD PHASE")
-    print("=" * 80 + "\n")
-
-    # ---------- Load (safe) ----------
-    load_tables_to_db(engine, schema, tables, results_list=results_list, incremental=incremental)
+    for table_name, table_csv_files in files_by_table.items():
+        print(f"\nProcessing table: '{table_name}' with {len(table_csv_files)} file(s)")
+        print("-" * 50)
+        
+        # 1. Extract and transform CSVs for this table
+        tables = extract_and_transform_csvs(engine, schema, table_csv_files)
+        if not tables or table_name not in tables:
+            continue
+            
+        # 2. Validate schema for this table
+        print(f"Validating schema for '{table_name}'...")
+        validate_all_tables(engine, schema, tables)
+        
+        # 3. Load data for this table
+        print(f"Loading data for '{table_name}'...")
+        load_tables_to_db(engine, schema, tables, results_list=results_list, incremental=incremental)
+        
+        # Free memory and trigger garbage collection
+        del tables
+        import gc
+        gc.collect()
 
     run_sql_files(engine, schema)
 
     print("\n" + "=" * 80)
     print("ETL COMPLETE")
     print("=" * 80 + "\n")
+
 
 
 def main():
