@@ -727,7 +727,10 @@ def validate_all_tables(engine, schema, tables):
 
         if db_struct is None:
             print(f"✓ Table {schema}.{table_name} does not exist → will be created")
-            continue2
+            continue
+
+        # Exclude 'row_hash' from database structure comparison since it is a loading metadata column
+        db_struct = [item for item in db_struct if item[0] != 'row_hash']
 
         # Check for created_at mismatch specifically
         db_cols = {col for col, _ in db_struct}
@@ -737,6 +740,7 @@ def validate_all_tables(engine, schema, tables):
                 conn.execute(text(f'ALTER TABLE "{schema}"."{table_name}" ADD COLUMN created_at TIMESTAMP WITHOUT TIME ZONE'))
             # Refresh db_struct
             db_struct = get_db_structure(engine, schema, table_name)
+            db_struct = [item for item in db_struct if item[0] != 'row_hash']
 
         # Auto-reorder CSV columns to match DB column order if they contain the exact same set
         db_cols_list = [col for col, _ in db_struct]
