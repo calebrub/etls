@@ -18,6 +18,7 @@ import csv
 import pandas as pd
 import re
 from sqlalchemy import create_engine, text
+from sqlalchemy.types import DateTime, BigInteger, Float, Date, Text
 import glob
 
 class TeeStream:
@@ -671,6 +672,26 @@ def infer_df_structure(df):
 
     return structure
 
+def get_sqlalchemy_dtypes(df):
+    """
+    Returns a dictionary of SQLAlchemy types for the DataFrame's columns,
+    based on the full-dataframe type inference from `infer_df_structure`.
+    """
+    structure = infer_df_structure(df)
+    dtype_dict = {}
+    for col, db_type in structure:
+        if db_type == "timestamp without time zone":
+            dtype_dict[col] = DateTime()
+        elif db_type == "bigint":
+            dtype_dict[col] = BigInteger()
+        elif db_type == "double precision":
+            dtype_dict[col] = Float()
+        elif db_type == "date":
+            dtype_dict[col] = Date()
+        else:
+            dtype_dict[col] = Text()
+    return dtype_dict
+
 
 def run_sql_files(engine, schema, sql_folder='sql'):
     """
@@ -1037,14 +1058,16 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
                 # Compute row_hash before inserting
                 df['row_hash'] = compute_row_hash(df)
                 
-                # Create table structure if it doesn't exist
+                # Create table structure if it doesn't exist using full-dataframe type inference
                 if db_struct is None:
+                    dtypes = get_sqlalchemy_dtypes(df)
                     df.head(0).to_sql(
                         table_name,
                         engine,
                         schema=schema,
                         if_exists="replace",
-                        index=False
+                        index=False,
+                        dtype=dtypes
                     )
                 # Bulk COPY the data
                 copy_df_to_table(engine, schema, table_name, df)
@@ -1080,14 +1103,10 @@ def load_tables_to_db(engine, schema, tables, results_list=None, incremental=Tru
                         for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
                             total_counts[(str(inst), str(acc))] = len(group)
 
-                    # Create staging table schema instantly
-                    df.head(0).to_sql(
-                        staging_table,
-                        engine,
-                        schema=schema,
-                        if_exists="replace",
-                        index=False
-                    )
+                    # Create staging table schema instantly by cloning the target table exactly
+                    with engine.begin() as conn:
+                        conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                        conn.execute(text(f'CREATE TABLE "{schema}"."{staging_table}" (LIKE "{schema}"."{table_name}" INCLUDING ALL)'))
                     # Bulk COPY data to staging table
                     copy_df_to_table(engine, schema, staging_table, df)
 
