@@ -940,6 +940,7 @@ WITH qp_cte AS (
         qp.patient_address_1,
         qp.created_at,
         qp.type_of_bill::varchar AS type_of_bill,
+        qp.charge_cpt_code,
         -- cleaned codes for LOC lookup
         ltrim(split_part(regexp_replace(qp.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(qp.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
@@ -1009,6 +1010,7 @@ SELECT
     qp_cte.payment_received_week,
     qp_cte.payment_received_month,
     qp_cte.payment_received_year,
+    qp_cte.charge_cpt_code,
     coalesce(loc1.level_of_care, loc2.level_of_care) AS loc,
     pnc.payer_code AS payer_class,
     -- Unique ID consistent with rate card views
@@ -1114,6 +1116,8 @@ WITH wot_cte AS (
         wot.credit_payer_name,
         wot.payment_payer_id::varchar AS payment_payer_id,
         wot.created_at,
+        wot.adjustment_code,
+        wot.adj_code_description,
         -- numeric cleaning for currency
         NULLIF(replace(replace(wot.patient_total_credits, '$', ''), ',', ''), '')::numeric AS int_patient_total_credits,
         NULLIF(replace(replace(wot.payment_total_applied, '$', ''), ',', ''), '')::numeric AS int_payment_total_applied,
