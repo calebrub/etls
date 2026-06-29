@@ -880,7 +880,22 @@ def validate_all_tables(engine, schema: str, tables: dict) -> None:
 
         df_struct = infer_df_structure(df)
 
-        if db_struct == df_struct:
+        def is_column_empty(series: pd.Series) -> bool:
+            return series.replace("", None).isna().all()
+
+        schemas_match = True
+        if len(db_struct) != len(df_struct):
+            schemas_match = False
+        else:
+            for (db_col, db_type), (csv_col, csv_type) in zip(db_struct, df_struct):
+                if db_col != csv_col:
+                    schemas_match = False
+                    break
+                if db_type != csv_type and not is_column_empty(df[db_col]):
+                    schemas_match = False
+                    break
+
+        if schemas_match:
             continue
 
         # Build a human-readable diff for the error message
@@ -904,7 +919,8 @@ def validate_all_tables(engine, schema: str, tables: dict) -> None:
         type_mismatches = []
         for i, ((db_col, db_type), (csv_col, csv_type)) in enumerate(zip(db_struct, df_struct)):
             if db_col == csv_col and db_type != csv_type:
-                type_mismatches.append(f"    Column '{db_col}': DB={db_type}, CSV={csv_type}")
+                if not is_column_empty(df[db_col]):
+                    type_mismatches.append(f"    Column '{db_col}': DB={db_type}, CSV={csv_type}")
             elif db_col != csv_col:
                 type_mismatches.append(
                     f"    Position {i}: DB has '{db_col}' ({db_type}), CSV has '{csv_col}' ({csv_type})"
@@ -1000,7 +1016,7 @@ def compute_row_hash(df: pd.DataFrame, exclude_cols: Optional[set] = None) -> pd
     if exclude_cols is None:
         exclude_cols = {'created_at', 'row_hash'}
     cols = [c for c in df.columns if c not in exclude_cols]
-    combined = df[cols].astype(str).apply(lambda row: '|'.join(row), axis=1)
+    combined = df[cols].apply(lambda row: '|'.join(map(str, row)), axis=1)
     return combined.apply(lambda v: hashlib.md5(v.encode('utf-8')).hexdigest())
 
 
@@ -1134,9 +1150,10 @@ def extract_and_transform_csvs(engine, schema: str, csv_files: list) -> dict:
             df = promote_numeric_columns(df)
             df = promote_date_columns(df)
 
-        # Columns that are entirely null become empty strings
+        # Columns that are entirely null become empty strings (skip existing DB columns to preserve coerced null types)
+        db_cols = {col for col, _ in db_struct} if db_struct is not None else set()
         for col in df.columns:
-            if df[col].isna().all():
+            if col not in db_cols and df[col].isna().all():
                 df[col] = ""
 
         # Re-insert instance_key at position 1 (after customer_account)
@@ -1456,7 +1473,7 @@ def main() -> None:
     elif not incremental:
         logging.info("⚡ Configured for FULL REFRESH (truncating tables before loading)")
     else:
-        logging.info("🔄 Running INCREMENTAL LOAD (upserting unique rows only)")
+        logging.info("Running INCREMENTAL LOAD (upserting unique rows only)")
 
     results_list = fetch_reports_to_csv(max_workers=args.workers)
     load_csvs_to_db(results_list=results_list, incremental=incremental)

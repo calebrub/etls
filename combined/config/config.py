@@ -30,13 +30,21 @@ INSTANCES = {
                 "report_id": "10078463",
                 "filter_id": "10141928",
                 "name": "denial_trends",
-                "account_filters": [{"account": "10023994", "filter_id": "10147269"}] #last_12_months
+                "account_filters": [
+                    {"account": "10023994", "filter_id": "10147416"}, #last_7_days
+                    # {"account": "10023994", "filter_id": "10147415"}, #last_9_months
+                    # {"account": "10023994", "filter_id": "10147269"}, #last_12_months
+                ]
              },
             {
                 "report_id": "10078516",
                 "filter_id": "10141930",
                 "name": "payment_trend",
-                "account_filters": [{"account": "10023994", "filter_id": "10147267"}] #last_12_months
+                "account_filters": [
+                    {"account": "10023994", "filter_id": "10147417"}, #last_7_days
+                    # {"account": "10023994", "filter_id": "10147412"},#last_9_months
+                    # {"account": "10023994", "filter_id": "10147267"},#last_12_months
+                ]
              },
             {"report_id": "10066805", "filter_id": "10141935", "name": "rcm_productivity"},
             {"report_id": "10078520", "filter_id": "10141934", "name": "user_time_spread"},
