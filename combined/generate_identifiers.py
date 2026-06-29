@@ -235,6 +235,7 @@ class AttemptRecord(TypedDict):
     customer_name: str
     report_name: str
     report_id: str
+    filter_id: str
     http_status: int
     api_status: str
     identifier: str
@@ -300,9 +301,9 @@ def run_report_for_account(
                 AttemptRecord(
                     instance_key=instance_key, customer_account=account,
                     customer_name=account_name, report_name=report_name.upper(),
-                    report_id=report_id, http_status=0, api_status="EXCEPTION",
-                    identifier="None", status_message=str(exc),
-                    retries=attempt, db_updated='FALSE',
+                    report_id=report_id, filter_id=filter_id, http_status=0,
+                    api_status="EXCEPTION", identifier="None",
+                    status_message=str(exc), retries=attempt, db_updated='FALSE',
                 ),
                 results_list, results_lock,
             )
@@ -314,7 +315,8 @@ def run_report_for_account(
                 AttemptRecord(
                     instance_key=instance_key, customer_account=account,
                     customer_name=account_name, report_name=report_name.upper(),
-                    report_id=report_id, http_status=response.status_code,
+                    report_id=report_id, filter_id=filter_id,
+                    http_status=response.status_code,
                     api_status=f"HTTP_{response.status_code}", identifier="None",
                     status_message=f"API Call Failed: HTTP {response.status_code}",
                     retries=attempt, db_updated='FALSE',
@@ -334,8 +336,8 @@ def run_report_for_account(
                 AttemptRecord(
                     instance_key=instance_key, customer_account=account,
                     customer_name=account_name, report_name=report_name.upper(),
-                    report_id=report_id, http_status=http_status,
-                    api_status=api_status,
+                    report_id=report_id, filter_id=filter_id,
+                    http_status=http_status, api_status=api_status,
                     identifier=str(identifier) if identifier is not None else "None",
                     status_message=status_message, retries=attempt, db_updated='TRUE',
                 ),
@@ -358,8 +360,8 @@ def run_report_for_account(
                 AttemptRecord(
                     instance_key=instance_key, customer_account=account,
                     customer_name=account_name, report_name=report_name.upper(),
-                    report_id=report_id, http_status=http_status,
-                    api_status=api_status,
+                    report_id=report_id, filter_id=filter_id,
+                    http_status=http_status, api_status=api_status,
                     identifier=str(identifier) if identifier is not None else "None",
                     status_message=status_message, retries=attempt, db_updated='FALSE',
                 ),
@@ -374,8 +376,9 @@ def run_report_for_account(
             AttemptRecord(
                 instance_key=instance_key, customer_account=account,
                 customer_name=account_name, report_name=report_name.upper(),
-                report_id=report_id, http_status=http_status,
-                api_status="MAX_RETRIES", identifier="None",
+                report_id=report_id, filter_id=filter_id,
+                http_status=http_status, api_status="MAX_RETRIES",
+                identifier="None",
                 status_message=f"Max retries ({MAX_RETRIES}) reached",
                 retries=MAX_RETRIES, db_updated='FALSE',
             ),
@@ -438,7 +441,7 @@ def generate_report_for_all_accounts(
 
 _SUMMARY_FIELDS = [
     'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
-    'http_status', 'api_status', 'identifier', 'status_message', 'retries', 'db_updated',
+    'filter_id', 'http_status', 'api_status', 'identifier', 'status_message', 'retries', 'db_updated',
 ]
 
 
