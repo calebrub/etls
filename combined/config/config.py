@@ -69,12 +69,12 @@ INSTANCES = {
             {"id": "10032271", "name": "AMITY SAN DIEGO"},
             {"id": "10032272", "name": "NORTHRIDGE ADDICTION TREATMENT CENTERS"},
             {"id": "10034661", "name": "PASSAGE TO RECOVERY"},
-            {"id": "10034812", "name": "SAN DIEGO WELLNESS"},
+            # {"id": "10034812", "name": "SAN DIEGO WELLNESS"}, # Moved to reveloop instance
             {"id": "10034187", "name": "THE TRINITY WELLNESS GROUP"},
             {"id": "10032876", "name": "AMITY PALM BEACH"},
-            {"id": "10035136", "name": "LIAH WELLNESS CENTER LLC"},
+            # {"id": "10035136", "name": "LIAH WELLNESS CENTER LLC"}, # Moved to reveloop instance
             # {"id": "10035138", "name": "LIAH WELLNESS SERVICES PLLC"}, # Deactivated
-            {"id": "10035139", "name": "THE BRIDGES OF HOUSTON LLC"},
+            # {"id": "10035139", "name": "THE BRIDGES OF HOUSTON LLC"},# Moved to reveloop instance
             # {"id": "10031999", "name": "BILLING SERVICE ACCOUNT"}, # Billing Service Account, No Data
         ],
 
