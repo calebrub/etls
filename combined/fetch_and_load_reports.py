@@ -1169,8 +1169,21 @@ def extract_and_transform_csvs(engine, schema: str, csv_files: list) -> dict:
             existing_cols = set(existing_df.columns)
             new_cols = set(df.columns)
 
+            # Strict structure validation: ensure identical sets of columns (ignoring order)
+            if existing_cols != new_cols:
+                missing_in_new = existing_cols - new_cols
+                extra_in_new = new_cols - existing_cols
+                error_parts = [
+                    f"Structure mismatch for table '{table_name}' between merged files."
+                ]
+                if missing_in_new:
+                    error_parts.append(f"  Missing columns in {csv_file}: {sorted(missing_in_new)}")
+                if extra_in_new:
+                    error_parts.append(f"  Extra columns in {csv_file}: {sorted(extra_in_new)}")
+                raise ValueError("\n".join(error_parts))
+
             for col in existing_cols - new_cols:
-                df[col] = ""
+                df[col] = pd.NA
                 logging.warning("  ⚠ Added missing column '%s' to %s", col, csv_file)
 
             extra_cols = new_cols - existing_cols
@@ -1187,6 +1200,12 @@ def extract_and_transform_csvs(engine, schema: str, csv_files: list) -> dict:
             logging.info("✓ Loaded CSV: %s (%d rows, %d columns)", csv_file, len(df), len(df.columns))
 
         tables[table_name] = df
+
+    # Run a final coercion pass on the merged DataFrames to align types with target DB schema
+    for t_name, t_df in tables.items():
+        db_struct = get_db_structure(engine, schema, t_name)
+        if db_struct is not None:
+            tables[t_name] = coerce_df_to_db_schema(t_df, db_struct)
 
     return tables
 
