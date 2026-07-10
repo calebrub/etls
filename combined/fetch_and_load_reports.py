@@ -22,6 +22,7 @@ Usage::
 
 import argparse
 import csv
+import fcntl
 import gc
 import glob
 import hashlib
@@ -43,6 +44,7 @@ import pandas as pd
 import psycopg2
 import requests
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.types import BigInteger, Date, DateTime, Float, Text
 
 from logging_utils import setup_file_logging
@@ -64,6 +66,51 @@ postgres_config: dict = {}
 
 # Column names added synthetically during the ETL — must not appear in source CSVs
 RESERVED_COLUMNS = {'created_at', 'row_hash'}
+
+# Number of CSV rows processed per chunk in the streaming incremental loader.
+# Caps peak memory so large tables (e.g. multi-million-row user_time_spread) load
+# on memory-constrained hosts without being OOM-killed. Override via env if needed.
+CHUNK_SIZE = int(os.environ.get('ETL_LOAD_CHUNK_SIZE', '250000'))
+
+# libpq connection options shared by every DB connection this ETL opens.
+# TCP keepalives stop the network/gateway from silently dropping a connection during
+# a long-running statement — the cause of the recurring "SSL connection has been
+# closed unexpectedly" failures (and of runs that hung forever waiting on a dead
+# socket). statement_timeout is a backstop so a stuck statement fails loudly instead
+# of hanging the process. Tunable via env for unusually long maintenance statements.
+DB_CONNECT_ARGS = {
+    'connect_timeout': 30,
+    'keepalives': 1,
+    'keepalives_idle': 30,
+    'keepalives_interval': 10,
+    'keepalives_count': 5,
+    'options': f"-c statement_timeout={os.environ.get('ETL_STATEMENT_TIMEOUT_MS', '3600000')}",
+}
+
+# Single-run lock: prevents overlapping ETL runs (e.g. a scheduler firing a new run
+# while a previous one is still going) from competing for memory and DB connections.
+LOCK_FILE = os.environ.get('ETL_LOCK_FILE', '/tmp/fetch_and_load_reports.lock')
+
+
+def acquire_run_lock():
+    """
+    Take an exclusive, non-blocking lock so only one ETL run executes at a time.
+
+    Returns the open file handle (which must stay referenced for the process
+    lifetime to hold the lock). Exits the process cleanly if another run holds it.
+    """
+    lock_fh = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logging.error(
+            "Another fetch_and_load_reports run is already in progress "
+            "(lock held on %s). Exiting to avoid overlapping runs.", LOCK_FILE
+        )
+        sys.exit(0)
+    lock_fh.write(str(os.getpid()))
+    lock_fh.flush()
+    return lock_fh
 
 
 def _bootstrap() -> None:
@@ -90,7 +137,41 @@ def postgres_connection() -> psycopg2.extensions.connection:
         password=postgres_config['password'],
         dbname=postgres_config['database'],
         port=postgres_config['port'],
+        **DB_CONNECT_ARGS,
     )
+
+
+def is_transient_db_error(exc: Exception) -> bool:
+    """
+    Check if the exception is a transient database/connection error that should be retried.
+    Excludes permanent/programming/data validation issues (like syntax errors, integrity
+    constraint violations, or database/schema mismatch errors).
+    """
+    # If it is not a database-related exception, it's a python bug (KeyError, NameError, etc.)
+    if not isinstance(exc, (psycopg2.Error, SQLAlchemyError)):
+        return False
+
+    # Check class name for known non-transient types
+    exc_class_name = exc.__class__.__name__
+    non_transient_classes = ["ProgrammingError", "DataError", "CompileError", "ArgumentError", "IntegrityError"]
+    if any(term in exc_class_name for term in non_transient_classes):
+        return False
+
+    # Check Postgres error code (pgcode) if available
+    pgcode = None
+    if hasattr(exc, 'orig') and hasattr(exc.orig, 'pgcode') and exc.orig.pgcode:
+        pgcode = exc.orig.pgcode
+    elif hasattr(exc, 'pgcode') and exc.pgcode:
+        pgcode = exc.pgcode
+
+    if pgcode:
+        # Class 42: Syntax Error or Access Rule Violation (e.g. undefined_table, undefined_column)
+        # Class 22: Data Exception (e.g. numeric_value_out_of_range, string_data_right_truncation)
+        # Class 23: Integrity Constraint Violation (e.g. unique_violation, foreign_key_violation)
+        if pgcode.startswith('42') or pgcode.startswith('22') or pgcode.startswith('23'):
+            return False
+
+    return True
 
 
 def load_report_matrix(instance_key: Optional[str] = None,
@@ -817,19 +898,52 @@ def run_sql_files(engine, schema: str, sql_folder: str = 'sql') -> None:
         logging.warning("⚠ No SQL files found in '%s' folder", sql_folder)
         return
 
+    failed_files = []
+
     for sql_file in sql_files:
-        logging.info("Executing: %s", os.path.basename(sql_file))
-        try:
-            with open(sql_file, 'r') as fh:
-                sql = fh.read()
-            # Prepend search_path so SQL files do not need to qualify table names
-            sql = f"SET search_path TO {schema};\n" + sql
-            with engine.begin() as conn:
-                conn.execute(text(sql))
-            logging.info("✓ Successfully executed: %s", os.path.basename(sql_file))
-        except Exception as exc:
-            logging.error("✗ Failed to execute %s: %s", os.path.basename(sql_file), exc)
-            raise
+        filename = os.path.basename(sql_file)
+        logging.info("Executing: %s", filename)
+
+        max_retries = 3
+        backoff_factors = [10, 30, 90]
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                with open(sql_file, 'r') as fh:
+                    sql = fh.read()
+                # Prepend search_path and disable statement timeout for this execution
+                sql = f"SET search_path TO {schema};\nSET statement_timeout = 0;\n" + sql
+                with engine.begin() as conn:
+                    conn.execute(text(sql))
+                logging.info("✓ Successfully executed: %s", filename)
+                break
+            except Exception as exc:
+                is_trans = is_transient_db_error(exc)
+
+                try:
+                    engine.dispose()
+                except Exception as disp_err:
+                    logging.debug("Error disposing engine on SQL retry: %s", disp_err)
+
+                if not is_trans or attempt == max_retries:
+                    logging.error("✗ Failed to execute %s: %s", filename, exc)
+                    failed_files.append((filename, str(exc)))
+                    break
+
+                delay = backoff_factors[attempt - 1]
+                logging.warning(
+                    "⚠ Connection or database error executing %s: %s. Retrying in %d seconds (attempt %d/%d)...",
+                    filename, exc, delay, attempt, max_retries
+                )
+                time.sleep(delay)
+
+    if failed_files:
+        logging.error("\n" + "=" * 80)
+        logging.error("✗ SQL EXECUTION SUMMARY: %d file(s) failed to execute", len(failed_files))
+        for filename, err in failed_files:
+            logging.error("  - %s: %s", filename, err)
+        logging.error("=" * 80)
+        raise RuntimeError(f"Failed to execute {len(failed_files)} SQL files: {[f[0] for f in failed_files]}")
 
     logging.info("✓ All SQL files executed successfully (%d files)", len(sql_files))
 
@@ -1016,8 +1130,19 @@ def compute_row_hash(df: pd.DataFrame, exclude_cols: Optional[set] = None) -> pd
     if exclude_cols is None:
         exclude_cols = {'created_at', 'row_hash'}
     cols = [c for c in df.columns if c not in exclude_cols]
-    combined = df[cols].apply(lambda row: '|'.join(map(str, row)), axis=1)
-    return combined.apply(lambda v: hashlib.md5(v.encode('utf-8')).hexdigest())
+
+    if not cols:
+        empty_digest = hashlib.md5(b'').hexdigest()
+        return pd.Series([empty_digest] * len(df), index=df.index)
+
+    # Build the '|'-joined row string column-at-a-time rather than with a row-wise
+    # ``apply(axis=1)``. ``Series.map(str)`` reproduces the exact per-element string
+    # of the old code (so hashes stay compatible with rows already in the DB), while
+    # ``str.cat`` concatenates in vectorized C — far faster and with a fraction of the
+    # peak memory of materializing one Python Series per row.
+    parts = [df[c].map(str) for c in cols]
+    combined = parts[0] if len(parts) == 1 else parts[0].str.cat(parts[1:], sep='|')
+    return combined.map(lambda v: hashlib.md5(v.encode('utf-8')).hexdigest())
 
 
 def ensure_row_hash_column(engine, schema: str, table_name: str) -> None:
@@ -1214,6 +1339,238 @@ def extract_and_transform_csvs(engine, schema: str, csv_files: list) -> dict:
 # Load phase
 # ---------------------------------------------------------------------------
 
+def _transform_chunk(
+    chunk: pd.DataFrame,
+    engine,
+    schema: str,
+    table_name: str,
+    db_struct: list,
+    created_at: pd.Timestamp,
+) -> pd.DataFrame:
+    """
+    Apply the same per-file transforms as :func:`extract_and_transform_csvs`
+    (rename → coerce → synthetic columns) to a single CSV chunk.
+
+    Only used by the streaming incremental loader, so ``db_struct`` is always a
+    real (existing-table) schema and the null-column-to-empty-string fixup is a
+    no-op — every source column already exists in the DB.
+    """
+    df = chunk
+
+    # Preserve the instance_key column before renaming (reserved name, but a
+    # legitimate source column added by the fetch phase).
+    instance_key_col = None
+    if 'instance_key' in df.columns:
+        instance_key_col = df['instance_key'].copy()
+        df = df.drop(columns=['instance_key'])
+
+    df.columns = [safe_column_name(c) for c in df.columns]
+    df = coerce_df_to_db_schema(df, db_struct)
+
+    # Columns entirely null in this chunk but not part of the DB schema become
+    # empty strings (mirrors the whole-file path; a no-op for existing tables).
+    db_cols = {col for col, _ in db_struct}
+    for col in df.columns:
+        if col not in db_cols and df[col].isna().all():
+            df[col] = ""
+
+    if instance_key_col is not None:
+        df.insert(1, 'instance_key', instance_key_col.reset_index(drop=True))
+
+    df['created_at'] = created_at
+    return df
+
+
+def _copy_chunk(raw_conn, schema: str, table_name: str, df: pd.DataFrame) -> None:
+    """COPY a single chunk into ``table_name`` on an already-open raw connection."""
+    buf = io.StringIO()
+    df.to_csv(buf, index=False, header=False, sep='\t', na_rep='\\N')
+    buf.seek(0)
+    cols = ', '.join(f'"{c}"' for c in df.columns)
+    with raw_conn.cursor() as cur:
+        cur.copy_expert(
+            f'COPY "{schema}"."{table_name}" ({cols}) '
+            f"FROM STDIN WITH (FORMAT csv, DELIMITER E'\\t', NULL '\\N')",
+            buf,
+        )
+
+
+def load_table_streaming(
+    engine,
+    schema: str,
+    table_name: str,
+    csv_files: list,
+    db_struct: list,
+    results_index: Optional[dict] = None,
+) -> None:
+    """
+    Memory-bounded incremental load for a single existing table.
+
+    Reads each CSV in ``CHUNK_SIZE`` chunks, streams them into an UNLOGGED staging
+    table, then inserts only rows whose ``row_hash`` is new via a single anti-join.
+    Peak memory is one chunk regardless of table size, so multi-million-row tables
+    load without being OOM-killed. Semantically identical to the whole-file
+    incremental path in :func:`load_tables_to_db`.
+    """
+    staging_table = f"{table_name}_staging"
+    created_at = pd.Timestamp.now()
+
+    max_retries = 3
+    backoff_factors = [10, 30, 90]
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            ensure_row_hash_column(engine, schema, table_name)
+
+            # UNLOGGED clone of the target — staging is transient, so skipping WAL makes the
+            # bulk COPY (the dominant write) markedly faster. INCLUDING ALL copies the
+            # row_hash index too, so the anti-join is indexed without an extra build step.
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                conn.execute(text(
+                    f'CREATE UNLOGGED TABLE "{schema}"."{staging_table}" '
+                    f'(LIKE "{schema}"."{table_name}" INCLUDING ALL)'
+                ))
+
+            total_counts: dict = {}   # (instance_key, customer_account) -> rows staged
+            total_staged = 0
+            insert_cols: Optional[list] = None
+            has_account_cols = False
+
+            raw_conn = engine.raw_connection()
+            try:
+                for csv_file in csv_files:
+                    for chunk in pd.read_csv(csv_file, low_memory=False, chunksize=CHUNK_SIZE):
+                        df = _transform_chunk(chunk, engine, schema, table_name, db_struct, created_at)
+                        if df.empty:
+                            continue
+
+                        df['row_hash'] = compute_row_hash(df)
+
+                        if insert_cols is None:
+                            insert_cols = list(df.columns)
+                            has_account_cols = (
+                                'customer_account' in insert_cols and 'instance_key' in insert_cols
+                            )
+
+                        if has_account_cols:
+                            grp = df.groupby(['instance_key', 'customer_account']).size()
+                            for (inst, acc), n in grp.items():
+                                key = (str(inst), str(acc))
+                                total_counts[key] = total_counts.get(key, 0) + int(n)
+
+                        total_staged += len(df)
+                        _copy_chunk(raw_conn, schema, staging_table, df)
+                        del df
+                        gc.collect()
+                raw_conn.commit()
+            finally:
+                try:
+                    raw_conn.close()
+                except Exception as close_err:
+                    logging.debug("Error closing raw connection: %s", close_err)
+
+            if total_staged == 0:
+                logging.info("✓ Incremental load %s.%s: nothing to load (0 rows)", schema, table_name)
+                with engine.begin() as conn:
+                    conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                return
+
+            cols_str = ", ".join(f'"{c}"' for c in insert_cols)
+            select_str = ", ".join(f's."{c}"' for c in insert_cols)
+
+            # Anti-join insert. The RETURNING rows are aggregated *inside Postgres* by the
+            # wrapping CTE, so even a full first-time load never ships millions of rows
+            # back to the client just to count them.
+            if has_account_cols:
+                insert_query = f"""
+                    WITH ins AS (
+                        INSERT INTO "{schema}"."{table_name}" ({cols_str})
+                        SELECT {select_str}
+                        FROM "{schema}"."{staging_table}" s
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM "{schema}"."{table_name}" t
+                            WHERE t.row_hash = s.row_hash
+                        )
+                        RETURNING instance_key, customer_account
+                    )
+                    SELECT instance_key, customer_account, count(*) AS n
+                    FROM ins GROUP BY instance_key, customer_account;
+                """
+                with engine.begin() as conn:
+                    returned = conn.execute(text(insert_query)).fetchall()
+                new_counts = {(str(r[0]), str(r[1])): int(r[2]) for r in returned}
+                inserted_rows = sum(new_counts.values())
+            else:
+                insert_query = f"""
+                    WITH ins AS (
+                        INSERT INTO "{schema}"."{table_name}" ({cols_str})
+                        SELECT {select_str}
+                        FROM "{schema}"."{staging_table}" s
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM "{schema}"."{table_name}" t
+                            WHERE t.row_hash = s.row_hash
+                        )
+                        RETURNING 1
+                    )
+                    SELECT count(*) FROM ins;
+                """
+                with engine.begin() as conn:
+                    inserted_rows = int(conn.execute(text(insert_query)).scalar() or 0)
+                new_counts = {}
+
+            duplicate_rows = total_staged - inserted_rows
+            logging.info(
+                "✓ Incremental load %s.%s: %d inserted, %d duplicates skipped (%d total)",
+                schema, table_name, inserted_rows, duplicate_rows, total_staged,
+            )
+
+            if results_index and has_account_cols:
+                for (inst, acc), total in total_counts.items():
+                    inserted = new_counts.get((inst, acc), 0)
+                    update_results_list(
+                        results_index, inst, table_name, acc,
+                        rows_inserted=inserted,
+                        rows_duplicate=max(0, total - inserted),
+                        load_status='SUCCESS',
+                    )
+
+            # Successfully completed. Drop staging table and exit function.
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+            return
+
+        except Exception as exc:
+            # Check if it's a transient db error
+            is_trans = is_transient_db_error(exc)
+
+            try:
+                engine.dispose()
+            except Exception as disp_err:
+                logging.debug("Error disposing engine on retry: %s", disp_err)
+
+            # Try to safely clean up the staging table, suppressing errors if the db is read-only
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+            except Exception as drop_err:
+                logging.debug("Staging table drop skipped or failed during retry block: %s", drop_err)
+
+            if not is_trans or attempt == max_retries:
+                if not is_trans:
+                    logging.error("✗ Non-retryable error loading %s.%s: %s", schema, table_name, exc)
+                else:
+                    logging.error("✗ Failed to load %s.%s after %d attempts: %s", schema, table_name, max_retries, exc)
+                raise
+
+            delay = backoff_factors[attempt - 1]
+            logging.warning(
+                "⚠ Connection or database error loading %s.%s: %s. Retrying in %d seconds (attempt %d/%d)...",
+                schema, table_name, exc, delay, attempt, max_retries
+            )
+            time.sleep(delay)
+
+
 def load_tables_to_db(
     engine,
     schema: str,
@@ -1228,146 +1585,174 @@ def load_tables_to_db(
     - ``incremental=False``: truncate the table first, then bulk-COPY all rows.
     """
     for table_name, df in tables.items():
-        try:
-            # Invalidate cache so we see the freshest schema
-            with _db_structure_cache_lock:
-                _db_structure_cache.pop((schema, table_name), None)
-            db_struct = get_db_structure(engine, schema, table_name)
+        max_retries = 3
+        backoff_factors = [10, 30, 90]
 
-            if not incremental or db_struct is None:
-                # Full-refresh path (or brand-new table)
-                if db_struct is not None:
-                    truncate_table(engine, schema, table_name)
-
-                df['row_hash'] = compute_row_hash(df)
-
-                if db_struct is None:
-                    # Create the table shell from inferred dtypes
-                    dtypes = get_sqlalchemy_dtypes(df)
-                    df.head(0).to_sql(
-                        table_name, engine, schema=schema,
-                        if_exists="replace", index=False, dtype=dtypes,
-                    )
-
-                copy_df_to_table(engine, schema, table_name, df)
-
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Invalidate cache so we see the freshest schema
                 with _db_structure_cache_lock:
                     _db_structure_cache.pop((schema, table_name), None)
+                db_struct = get_db_structure(engine, schema, table_name)
 
-                logging.info("✓ Loaded %s.%s (%d rows)", schema, table_name, len(df))
-                ensure_row_hash_column(engine, schema, table_name)
+                if not incremental or db_struct is None:
+                    # Full-refresh path (or brand-new table)
+                    if db_struct is not None:
+                        truncate_table(engine, schema, table_name)
 
-                # Update results summary
-                if results_index and 'customer_account' in df.columns and 'instance_key' in df.columns:
-                    for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
-                        update_results_list(
-                            results_index, str(inst), table_name, str(acc),
-                            rows_inserted=len(group), rows_duplicate=0, load_status='SUCCESS',
-                        )
-
-            else:
-                # Incremental path — use a staging table + hash-based anti-join
-                staging_table = f"{table_name}_staging"
-                try:
-                    ensure_row_hash_column(engine, schema, table_name)
                     df['row_hash'] = compute_row_hash(df)
 
-                    # Track total rows per account before the insert
-                    total_counts: dict = {}
-                    if 'customer_account' in df.columns and 'instance_key' in df.columns:
-                        for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
-                            total_counts[(str(inst), str(acc))] = len(group)
-
-                    # Clone target table structure into a staging table
-                    with engine.begin() as conn:
-                        conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
-                        conn.execute(text(
-                            f'CREATE TABLE "{schema}"."{staging_table}" '
-                            f'(LIKE "{schema}"."{table_name}" INCLUDING ALL)'
-                        ))
-
-                    copy_df_to_table(engine, schema, staging_table, df)
-
-                    # Index staging table for the anti-join
-                    with engine.begin() as conn:
-                        conn.execute(text(
-                            f'CREATE INDEX ON "{schema}"."{staging_table}" (row_hash)'
-                        ))
-
-                    insert_cols = [c for c in df.columns if c != 'row_hash']
-                    all_cols_str = ", ".join(f'"{c}"' for c in insert_cols) + ', "row_hash"'
-                    staging_cols_str = ", ".join(f's."{c}"' for c in insert_cols) + ', s."row_hash"'
-
-                    has_account_cols = (
-                        'customer_account' in df.columns and 'instance_key' in df.columns
-                    )
-                    returning_clause = (
-                        ' RETURNING instance_key, customer_account' if has_account_cols else ''
-                    )
-
-                    insert_query = f"""
-                        INSERT INTO "{schema}"."{table_name}" ({all_cols_str})
-                        SELECT {staging_cols_str}
-                        FROM "{schema}"."{staging_table}" s
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM "{schema}"."{table_name}" t
-                            WHERE t.row_hash = s.row_hash
-                        ){returning_clause};
-                    """
-
-                    new_counts: dict = {}
-                    with engine.begin() as conn:
-                        result = conn.execute(text(insert_query))
-                        if has_account_cols:
-                            returned_rows = result.fetchall()
-                            inserted_rows = len(returned_rows)
-                            for r in returned_rows:
-                                key = (str(r[0]), str(r[1]))
-                                new_counts[key] = new_counts.get(key, 0) + 1
-                        else:
-                            inserted_rows = result.rowcount
-
-                    duplicate_rows = len(df) - inserted_rows
-                    logging.info(
-                        "✓ Incremental load %s.%s: %d inserted, %d duplicates skipped (%d total)",
-                        schema, table_name, inserted_rows, duplicate_rows, len(df),
-                    )
-
-                    if results_index and has_account_cols:
-                        unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
-                        for _, row in unique_groups.iterrows():
-                            inst, acc = str(row['instance_key']), str(row['customer_account'])
-                            total = total_counts.get((inst, acc), 0)
-                            inserted = new_counts.get((inst, acc), 0)
-                            update_results_list(
-                                results_index, inst, table_name, acc,
-                                rows_inserted=inserted,
-                                rows_duplicate=max(0, total - inserted),
-                                load_status='SUCCESS',
-                            )
-
-                finally:
-                    try:
-                        with engine.begin() as conn:
-                            conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
-                    except Exception as drop_err:
-                        logging.warning(
-                            "⚠ Failed to drop staging table %s: %s", staging_table, drop_err
+                    if db_struct is None:
+                        # Create the table shell from inferred dtypes
+                        dtypes = get_sqlalchemy_dtypes(df)
+                        df.head(0).to_sql(
+                            table_name, engine, schema=schema,
+                            if_exists="replace", index=False, dtype=dtypes,
                         )
 
-        except Exception as exc:
-            logging.error("✗ Failed to load %s.%s: %s", schema, table_name, exc)
-            if results_index and 'customer_account' in df.columns and 'instance_key' in df.columns:
-                unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
-                for _, row in unique_groups.iterrows():
-                    update_results_list(
-                        results_index, str(row['instance_key']), table_name,
-                        str(row['customer_account']),
-                        rows_inserted=0, rows_duplicate=0,
-                        load_status='FAILED', load_error=str(exc),
-                    )
-            engine.dispose()
-            raise
+                    copy_df_to_table(engine, schema, table_name, df)
+
+                    with _db_structure_cache_lock:
+                        _db_structure_cache.pop((schema, table_name), None)
+
+                    logging.info("✓ Loaded %s.%s (%d rows)", schema, table_name, len(df))
+                    ensure_row_hash_column(engine, schema, table_name)
+
+                    # Update results summary
+                    if results_index and 'customer_account' in df.columns and 'instance_key' in df.columns:
+                        for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
+                            update_results_list(
+                                results_index, str(inst), table_name, str(acc),
+                                rows_inserted=len(group), rows_duplicate=0, load_status='SUCCESS',
+                            )
+
+                else:
+                    # Incremental path — use a staging table + hash-based anti-join
+                    staging_table = f"{table_name}_staging"
+                    try:
+                        ensure_row_hash_column(engine, schema, table_name)
+                        df['row_hash'] = compute_row_hash(df)
+
+                        # Track total rows per account before the insert
+                        total_counts: dict = {}
+                        if 'customer_account' in df.columns and 'instance_key' in df.columns:
+                            for (inst, acc), group in df.groupby(['instance_key', 'customer_account']):
+                                total_counts[(str(inst), str(acc))] = len(group)
+
+                        # Clone target table structure into a staging table
+                        with engine.begin() as conn:
+                            conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                            conn.execute(text(
+                                f'CREATE TABLE "{schema}"."{staging_table}" '
+                                f'(LIKE "{schema}"."{table_name}" INCLUDING ALL)'
+                            ))
+
+                        copy_df_to_table(engine, schema, staging_table, df)
+
+                        # Index staging table for the anti-join
+                        with engine.begin() as conn:
+                            conn.execute(text(
+                                f'CREATE INDEX ON "{schema}"."{staging_table}" (row_hash)'
+                            ))
+
+                        insert_cols = [c for c in df.columns if c != 'row_hash']
+                        all_cols_str = ", ".join(f'"{c}"' for c in insert_cols) + ', "row_hash"'
+                        staging_cols_str = ", ".join(f's."{c}"' for c in insert_cols) + ', s."row_hash"'
+
+                        has_account_cols = (
+                            'customer_account' in df.columns and 'instance_key' in df.columns
+                        )
+                        returning_clause = (
+                            ' RETURNING instance_key, customer_account' if has_account_cols else ''
+                        )
+
+                        insert_query = f"""
+                            INSERT INTO "{schema}"."{table_name}" ({all_cols_str})
+                            SELECT {staging_cols_str}
+                            FROM "{schema}"."{staging_table}" s
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM "{schema}"."{table_name}" t
+                                WHERE t.row_hash = s.row_hash
+                            ){returning_clause};
+                        """
+
+                        new_counts: dict = {}
+                        with engine.begin() as conn:
+                            result = conn.execute(text(insert_query))
+                            if has_account_cols:
+                                returned_rows = result.fetchall()
+                                inserted_rows = len(returned_rows)
+                                for r in returned_rows:
+                                    key = (str(r[0]), str(r[1]))
+                                    new_counts[key] = new_counts.get(key, 0) + 1
+                            else:
+                                inserted_rows = result.rowcount
+
+                        duplicate_rows = len(df) - inserted_rows
+                        logging.info(
+                            "✓ Incremental load %s.%s: %d inserted, %d duplicates skipped (%d total)",
+                            schema, table_name, inserted_rows, duplicate_rows, len(df),
+                        )
+
+                        if results_index and has_account_cols:
+                            unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
+                            for _, row in unique_groups.iterrows():
+                                inst, acc = str(row['instance_key']), str(row['customer_account'])
+                                total = total_counts.get((inst, acc), 0)
+                                inserted = new_counts.get((inst, acc), 0)
+                                update_results_list(
+                                    results_index, inst, table_name, acc,
+                                    rows_inserted=inserted,
+                                    rows_duplicate=max(0, total - inserted),
+                                    load_status='SUCCESS',
+                                )
+
+                    finally:
+                        try:
+                            with engine.begin() as conn:
+                                conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                        except Exception as drop_err:
+                            logging.warning(
+                                "⚠ Failed to drop staging table %s: %s", staging_table, drop_err
+                            )
+                # Successful load of this table, break retry loop to go to next table
+                break
+
+            except Exception as exc:
+                is_trans = is_transient_db_error(exc)
+
+                try:
+                    engine.dispose()
+                except Exception as disp_err:
+                    logging.debug("Error disposing engine on retry: %s", disp_err)
+
+                # Try to safely clean up the staging table, suppressing errors if the db is read-only
+                staging_table = f"{table_name}_staging"
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(text(f'DROP TABLE IF EXISTS "{schema}"."{staging_table}"'))
+                except Exception as drop_err:
+                    logging.debug("Staging table drop skipped or failed during retry block: %s", drop_err)
+
+                if not is_trans or attempt == max_retries:
+                    logging.error("✗ Failed to load %s.%s: %s", schema, table_name, exc)
+                    if results_index and 'customer_account' in df.columns and 'instance_key' in df.columns:
+                        unique_groups = df[['instance_key', 'customer_account']].drop_duplicates()
+                        for _, row in unique_groups.iterrows():
+                            update_results_list(
+                                results_index, str(row['instance_key']), table_name,
+                                str(row['customer_account']),
+                                rows_inserted=0, rows_duplicate=0,
+                                load_status='FAILED', load_error=str(exc),
+                            )
+                    raise
+
+                delay = backoff_factors[attempt - 1]
+                logging.warning(
+                    "⚠ Connection or database error loading %s.%s: %s. Retrying in %d seconds (attempt %d/%d)...",
+                    schema, table_name, exc, delay, attempt, max_retries
+                )
+                time.sleep(delay)
 
 
 # ---------------------------------------------------------------------------
@@ -1390,7 +1775,10 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Tru
     schema = postgres_config['schema']
     engine = create_engine(
         f"postgresql://{postgres_config['user']}:{postgres_config['password']}"
-        f"@{postgres_config['host']}:{postgres_config['port']}/{postgres_config['database']}"
+        f"@{postgres_config['host']}:{postgres_config['port']}/{postgres_config['database']}",
+        pool_pre_ping=True,      # detect & replace dead connections on checkout
+        pool_recycle=1800,       # recycle connections older than 30 min
+        connect_args=DB_CONNECT_ARGS,
     )
 
     instance_list = config_loader.list_instances()
@@ -1443,6 +1831,20 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Tru
         logging.info("\nProcessing table: '%s' (%d file(s))", table_name, len(table_csv_files))
         logging.info("-" * 50)
 
+        # Incremental loads of an existing table use the memory-bounded streaming
+        # loader (chunked read → staging → anti-join). The whole-file path is kept
+        # for full-refresh runs and brand-new tables, which need the complete frame
+        # to infer/replace the schema; these are rare and typically small.
+        db_struct = get_db_structure(engine, schema, table_name)
+        if incremental and db_struct is not None:
+            logging.info("Loading data for '%s'...", table_name)
+            load_table_streaming(
+                engine, schema, table_name, table_csv_files,
+                db_struct, results_index=results_index,
+            )
+            gc.collect()
+            continue
+
         tables = extract_and_transform_csvs(engine, schema, table_csv_files)
         if not tables or table_name not in tables:
             continue
@@ -1465,6 +1867,9 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Tru
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    # Held for the whole run; released automatically when the process exits.
+    _run_lock = acquire_run_lock()  # noqa: F841
+
     logging.info("\n" + "=" * 80)
     logging.info("STARTING ETL PIPELINE")
     logging.info("=" * 80)

@@ -11,24 +11,10 @@ LOCAL_DIR="combined"
 # -a: archive mode (preserves permissions, times, etc.)
 # -v: verbose
 # -z: compress during transfer
-rsync -avz \
+export SSHPASS='84pVrZ6c5XVwF9dnl45jd'
+sshpass -e rsync -avz \
   --exclude 'csv_files' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude 'logs' \
   "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
-
-# --- AUTOMATION WITH PASSWORD ---
-# If you want to put the password in this script (NOT RECOMMENDED for security),
-# you can use 'sshpass'. You would need to install sshpass first.
-#
-# 1. Install sshpass (e.g., brew install sshpass)
-# 2. Uncomment the lines below and replace 'YOUR_PASSWORD_HERE'
-#
-# export SSHPASS='YOUR_PASSWORD_HERE'//84pVrZ6c5XVwF9dnl45jd
-# sshpass -e rsync -avz \
-#   --exclude 'csv_files' \
-#   --exclude '__pycache__' \
-#   --exclude '*.pyc' \
-#   --exclude 'logs' \
-#   "$LOCAL_DIR" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"

@@ -15,3 +15,10 @@ combined/logs/
 combined/logs/fetch_and_load_reports.log
 combined/logs/generate_identifiers.log
 
+# Local scratch, logs, and backup files
+scratch_test_run.py
+test_api_fetch.py
+timesheet.csv
+logs/
+combined/sql/*.bak
+
