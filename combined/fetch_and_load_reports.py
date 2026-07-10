@@ -1375,7 +1375,7 @@ def _transform_chunk(
             df[col] = ""
 
     if instance_key_col is not None:
-        df.insert(1, 'instance_key', instance_key_col.reset_index(drop=True))
+        df.insert(1, 'instance_key', instance_key_col.values)
 
     df['created_at'] = created_at
     return df
