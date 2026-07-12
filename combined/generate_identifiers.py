@@ -42,8 +42,8 @@ setup_file_logging("generate_identifiers.log")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MAX_RETRIES = 100           # Maximum number of retry attempts per report
-RETRY_DELAY_SECS = 60       # Seconds to wait between retries (RUNNING / DUPLICATE)
+MAX_RETRIES = 400           # Maximum number of retry attempts per report (400 * 15s = 100 mins)
+RETRY_DELAY_SECS = 15       # Seconds to wait between retries (RUNNING / DUPLICATE)
 INTER_ACCOUNT_DELAY_SECS = 5  # Polite delay between consecutive account calls
 
 API_NAMESPACE = {'ns1': 'http://www.collaboratemd.com/api/v1/'}
@@ -242,6 +242,7 @@ class AttemptRecord(TypedDict):
     status_message: str
     retries: int
     db_updated: str  # 'TRUE' | 'FALSE'
+    time_taken: float
 
 
 def record_attempt(
@@ -287,6 +288,7 @@ def run_report_for_account(
     api_status = "UNKNOWN"
     status_message = "No response"
     http_status = 0
+    start_time = time.time()
 
     for attempt in range(MAX_RETRIES):
         payload = f"<Run><Nonce>{time.time()}</Nonce></Run>"
@@ -304,6 +306,7 @@ def run_report_for_account(
                     report_id=report_id, filter_id=filter_id, http_status=0,
                     api_status="EXCEPTION", identifier="None",
                     status_message=str(exc), retries=attempt, db_updated='FALSE',
+                    time_taken=round(time.time() - start_time, 2),
                 ),
                 results_list, results_lock,
             )
@@ -320,6 +323,7 @@ def run_report_for_account(
                     api_status=f"HTTP_{response.status_code}", identifier="None",
                     status_message=f"API Call Failed: HTTP {response.status_code}",
                     retries=attempt, db_updated='FALSE',
+                    time_taken=round(time.time() - start_time, 2),
                 ),
                 results_list, results_lock,
             )
@@ -340,6 +344,7 @@ def run_report_for_account(
                     http_status=http_status, api_status=api_status,
                     identifier=str(identifier) if identifier is not None else "None",
                     status_message=status_message, retries=attempt, db_updated='TRUE',
+                    time_taken=round(time.time() - start_time, 2),
                 ),
                 results_list, results_lock,
             )
@@ -364,6 +369,7 @@ def run_report_for_account(
                     http_status=http_status, api_status=api_status,
                     identifier=str(identifier) if identifier is not None else "None",
                     status_message=status_message, retries=attempt, db_updated='FALSE',
+                    time_taken=round(time.time() - start_time, 2),
                 ),
                 results_list, results_lock,
             )
@@ -381,6 +387,7 @@ def run_report_for_account(
                 identifier="None",
                 status_message=f"Max retries ({MAX_RETRIES}) reached",
                 retries=MAX_RETRIES, db_updated='FALSE',
+                time_taken=round(time.time() - start_time, 2),
             ),
             results_list, results_lock,
         )
@@ -441,7 +448,7 @@ def generate_report_for_all_accounts(
 
 _SUMMARY_FIELDS = [
     'instance_key', 'customer_account', 'customer_name', 'report_name', 'report_id',
-    'filter_id', 'http_status', 'api_status', 'identifier', 'status_message', 'retries', 'db_updated',
+    'filter_id', 'http_status', 'api_status', 'identifier', 'status_message', 'retries', 'db_updated', 'time_taken',
 ]
 
 
