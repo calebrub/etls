@@ -22,10 +22,10 @@ INSTANCES = {
         ],
         # To override filter_id per customer account, add: "account_filters": [{"account": "12345", "filter_id": "67890"}]
         'report_configs': [
-            {"report_id": "10078378", "filter_id": "10147688", "name": "ar_aging"},
-            {"report_id": "10078486", "filter_id": "10147699", "name": "gross_billing"},
-            {"report_id": "10078375", "filter_id": "10147690", "name": "charges_on_hold"},
-            {"report_id": "10078446", "filter_id": "10147691", "name": "claim_stage_breakdown"},
+            {"report_id": "10078378", "filter_id": "10147688", "name": "ar_aging"},  # last_30_days
+            {"report_id": "10078486", "filter_id": "10147699", "name": "gross_billing"},  # last_30_days
+            {"report_id": "10078375", "filter_id": "10147690", "name": "charges_on_hold"},  # last_30_days
+            {"report_id": "10078446", "filter_id": "10147691", "name": "claim_stage_breakdown"},  # last_30_days
             {
                 "report_id": "10078463",
                 "filter_id": "10141928",
@@ -46,25 +46,25 @@ INSTANCES = {
                     # {"account": "10023994", "filter_id": "10147267"},#last_12_months
                 ]
              },
-            {"report_id": "10066805", "filter_id": "10147704", "name": "rcm_productivity"},
-            {"report_id": "10078520", "filter_id": "10147709", "name": "user_time_spread"},
-            {"report_id": "10078521", "filter_id": "10147710", "name": "write_off_trend"},
-            {"report_id": "10078522", "filter_id": "10147701", "name": "pdr3_calculator"},
-            {"report_id": "10078523", "filter_id": "10147706", "name": "rev_rec_charges"},
+            {"report_id": "10066805", "filter_id": "10147704", "name": "rcm_productivity"},  # last_30_days
+            {"report_id": "10078520", "filter_id": "10147709", "name": "user_time_spread"},  # last_30_days
+            {"report_id": "10078521", "filter_id": "10147710", "name": "write_off_trend"},  # last_30_days
+            {"report_id": "10078522", "filter_id": "10147701", "name": "pdr3_calculator"},  # last_30_days
+            {"report_id": "10078523", "filter_id": "10147706", "name": "rev_rec_charges"},  # last_30_days
             {
                 "report_id": "10078524",
                 "filter_id": "10141937",
                 "name": "rev_rec_payments",
                 "account_filters": [{"account": "10023994", "filter_id": "10147270"}] #last_12_months
             },
-            {"report_id": "10091708", "filter_id": "10147689", "name": "benefits_call_campaign"},
-            {"report_id": "10091711", "filter_id": "10147692", "name": "clearing_house_rejections"},
-            {"report_id": "10091714", "filter_id": "10147693", "name": "client_billing_reports"},
-            {"report_id": "10091718", "filter_id": "10147694", "name": "deposits_for_invoicing"},
-            {"report_id": "10091946", "filter_id": "10147700", "name": "model_data"},
-            {"report_id": "10091724", "filter_id": "10147702", "name": "quadrant_performance"},
-            {"report_id": "10091725", "filter_id": "10147705", "name": "rejected_at_payer"},
-            {"report_id": "10091726", "filter_id": "10147708", "name": "revamped_weekly_ar_worklists"}
+            {"report_id": "10091708", "filter_id": "10147689", "name": "benefits_call_campaign"},  # last_30_days
+            {"report_id": "10091711", "filter_id": "10147692", "name": "clearing_house_rejections"},  # last_30_days
+            {"report_id": "10091714", "filter_id": "10147693", "name": "client_billing_reports"},  # last_30_days
+            {"report_id": "10091718", "filter_id": "10147694", "name": "deposits_for_invoicing"},  # last_30_days
+            {"report_id": "10091946", "filter_id": "10147700", "name": "model_data"},  # last_30_days
+            {"report_id": "10091724", "filter_id": "10147702", "name": "quadrant_performance"},  # last_30_days
+            {"report_id": "10091725", "filter_id": "10147705", "name": "rejected_at_payer"},  # last_30_days
+            {"report_id": "10091726", "filter_id": "10147708", "name": "revamped_weekly_ar_worklists"}  # last_30_days
         ],
     },
 
@@ -87,26 +87,26 @@ INSTANCES = {
         ],
 
         'report_configs': [
-            {"report_id": "10062054", "filter_id": "10147629", "name": "ar_aging"},
-            {"report_id": "10083396", "filter_id": "10147633", "name": "charges_on_hold"},
-            {"report_id": "10062056", "filter_id": "10147634", "name": "claim_stage_breakdown"},
-            {"report_id": "10062057", "filter_id": "10147637", "name": "denial_trends"},
-            {"report_id": "10062059", "filter_id": "10146947", "name": "gross_billing"},
-            {"report_id": "10062060", "filter_id": "10147651", "name": "payment_trend"},
-            {"report_id": "10062061", "filter_id": "10147649", "name": "quadrant_performance"},
-            {"report_id": "10062064", "filter_id": "10147645", "name": "rcm_productivity"},
-            {"report_id": "10062065", "filter_id": "10147640", "name": "user_time_spread"},
-            {"report_id": "10062066", "filter_id": "10147639", "name": "write_off_trend"},
-            {"report_id": "10085814", "filter_id": "10147650", "name": "pdr3_calculator"},
-            {"report_id": "10085817", "filter_id": "10147643", "name": "rev_rec_charges"},
-            {"report_id": "10085815", "filter_id": "10147642", "name": "rev_rec_payments"},
-            {"report_id": "10062052", "filter_id": "10147630", "name": "benefits_call_campaign"},
-            {"report_id": "10062067", "filter_id": "10147635", "name": "clearing_house_rejections"},
-            {"report_id": "10074011", "filter_id": "10147638", "name": "client_billing_reports"},
-            {"report_id": "10075405", "filter_id": "10147653", "name": "deposits_for_invoicing"},
-            {"report_id": "10075127", "filter_id": "10147652", "name": "model_data"},
-            {"report_id": "10062068", "filter_id": "10147644", "name": "rejected_at_payer"},
-            {"report_id": "10062063", "filter_id": "10147641", "name": "revamped_weekly_ar_worklists"}
+            {"report_id": "10062054", "filter_id": "10147629", "name": "ar_aging"},  # last_30_days
+            {"report_id": "10083396", "filter_id": "10147633", "name": "charges_on_hold"},  # last_30_days
+            {"report_id": "10062056", "filter_id": "10147634", "name": "claim_stage_breakdown"},  # last_30_days
+            {"report_id": "10062057", "filter_id": "10147637", "name": "denial_trends"},  # last_30_days
+            {"report_id": "10062059", "filter_id": "10146947", "name": "gross_billing"},  # this_month
+            {"report_id": "10062060", "filter_id": "10147651", "name": "payment_trend"},  # last_30_days
+            {"report_id": "10062061", "filter_id": "10147649", "name": "quadrant_performance"},  # last_30_days
+            {"report_id": "10062064", "filter_id": "10147645", "name": "rcm_productivity"},  # last_30_days
+            {"report_id": "10062065", "filter_id": "10147640", "name": "user_time_spread"},  # last_30_days
+            {"report_id": "10062066", "filter_id": "10147639", "name": "write_off_trend"},  # last_30_days
+            {"report_id": "10085814", "filter_id": "10147650", "name": "pdr3_calculator"},  # last_30_days
+            {"report_id": "10085817", "filter_id": "10147643", "name": "rev_rec_charges"},  # last_30_days
+            {"report_id": "10085815", "filter_id": "10147642", "name": "rev_rec_payments"},  # last_30_days
+            {"report_id": "10062052", "filter_id": "10147630", "name": "benefits_call_campaign"},  # last_30_days
+            {"report_id": "10062067", "filter_id": "10147635", "name": "clearing_house_rejections"},  # last_30_days
+            {"report_id": "10074011", "filter_id": "10147638", "name": "client_billing_reports"},  # last_30_days
+            {"report_id": "10075405", "filter_id": "10147653", "name": "deposits_for_invoicing"},  # last_30_days
+            {"report_id": "10075127", "filter_id": "10147652", "name": "model_data"},  # last_30_days
+            {"report_id": "10062068", "filter_id": "10147644", "name": "rejected_at_payer"},  # last_30_days
+            {"report_id": "10062063", "filter_id": "10147641", "name": "revamped_weekly_ar_worklists"}  # last_30_days
         ],
     },
 
@@ -164,26 +164,26 @@ INSTANCES = {
             {"id": "10029719", "name": "WEST LA RECOVERY"},
         ],
         'report_configs': [
-            {"report_id": "10090107", "filter_id": "10146579", "name": "ar_aging"},
-            {"report_id": "10090108", "filter_id": "10147714", "name": "benefits_call_campaign"},
-            {"report_id": "10090109", "filter_id": "10146581", "name": "charges_on_hold"},
-            {"report_id": "10090129", "filter_id": "10147716", "name": "claim_stage_breakdown"},
-            {"report_id": "10090132", "filter_id": "10147717", "name": "clearing_house_rejections"},
-            {"report_id": "10090135", "filter_id": "10147719", "name": "client_billing_reports"},
-            {"report_id": "10090138", "filter_id": "10147720", "name": "denial_trends"},
-            {"report_id": "10090141", "filter_id": "10147721", "name": "deposits_for_invoicing"},
-            {"report_id": "10090150", "filter_id": "10147722", "name": "gross_billing"},
-            {"report_id": "10090151", "filter_id": "10147723", "name": "model_data"},
-            {"report_id": "10090155", "filter_id": "10147724", "name": "payment_trend"},
-            {"report_id": "10090158", "filter_id": "10147725", "name": "pdr3_calculator"},
-            {"report_id": "10090160", "filter_id": "10146591", "name": "quadrant_performance"},
-            {"report_id": "10090161", "filter_id": "10147727", "name": "rcm_productivity"},
-            {"report_id": "10090162", "filter_id": "10147728", "name": "rejected_at_payer"},
-            {"report_id": "10090164", "filter_id": "10147729", "name": "rev_rec_charges"},
-            {"report_id": "10090165", "filter_id": "10147730", "name": "rev_rec_payments"},
-            {"report_id": "10090168", "filter_id": "10147731", "name": "revamped_weekly_ar_worklists"},
-            {"report_id": "10090169", "filter_id": "10147732", "name": "user_time_spread"},
-            {"report_id": "10090175", "filter_id": "10147733", "name": "write_off_trend"},
+            {"report_id": "10090107", "filter_id": "10146579", "name": "ar_aging"},  # all_tableau
+            {"report_id": "10090108", "filter_id": "10147714", "name": "benefits_call_campaign"},  # last_30_days
+            {"report_id": "10090109", "filter_id": "10146581", "name": "charges_on_hold"},  # all_tableau
+            {"report_id": "10090129", "filter_id": "10147716", "name": "claim_stage_breakdown"},  # last_30_days
+            {"report_id": "10090132", "filter_id": "10147717", "name": "clearing_house_rejections"},  # last_30_days
+            {"report_id": "10090135", "filter_id": "10147719", "name": "client_billing_reports"},  # last_30_days
+            {"report_id": "10090138", "filter_id": "10147720", "name": "denial_trends"},  # last_30_days
+            {"report_id": "10090141", "filter_id": "10147721", "name": "deposits_for_invoicing"},  # last_30_days
+            {"report_id": "10090150", "filter_id": "10147722", "name": "gross_billing"},  # last_30_days
+            {"report_id": "10090151", "filter_id": "10147723", "name": "model_data"},  # last_30_days
+            {"report_id": "10090155", "filter_id": "10147724", "name": "payment_trend"},  # last_30_days
+            {"report_id": "10090158", "filter_id": "10147725", "name": "pdr3_calculator"},  # last_30_days
+            {"report_id": "10090160", "filter_id": "10146591", "name": "quadrant_performance"},  # all_tableau
+            {"report_id": "10090161", "filter_id": "10147727", "name": "rcm_productivity"},  # last_30_days
+            {"report_id": "10090162", "filter_id": "10147728", "name": "rejected_at_payer"},  # last_30_days
+            {"report_id": "10090164", "filter_id": "10147729", "name": "rev_rec_charges"},  # last_30_days
+            {"report_id": "10090165", "filter_id": "10147730", "name": "rev_rec_payments"},  # last_30_days
+            {"report_id": "10090168", "filter_id": "10147731", "name": "revamped_weekly_ar_worklists"},  # last_30_days
+            {"report_id": "10090169", "filter_id": "10147732", "name": "user_time_spread"},  # last_30_days
+            {"report_id": "10090175", "filter_id": "10147733", "name": "write_off_trend"},  # last_30_days
         ]
     },
     'reveloop': {
@@ -198,26 +198,26 @@ INSTANCES = {
             {"id": "10034288", "name": "AVIV WELLNESS CENTER"},
         ],
         'report_configs': [
-            {"report_id": "10090319", "filter_id": "10146864", "name": "ar_aging"},
-            {"report_id": "10090320", "filter_id": "10146865", "name": "benefits_call_campaign"},
-            {"report_id": "10090324", "filter_id": "10146867", "name": "charges_on_hold"},
-            {"report_id": "10090325", "filter_id": "10146868", "name": "claim_stage_breakdown"},
-            {"report_id": "10090326", "filter_id": "10147080", "name": "clearing_house_rejections"},
-            {"report_id": "10090331", "filter_id": "10146869", "name": "client_billing_reports"},
-            {"report_id": "10090333", "filter_id": "10146870", "name": "denial_trends"},
-            {"report_id": "10090339", "filter_id": "10146871", "name": "deposits_for_invoicing"},
-            {"report_id": "10090341", "filter_id": "10146872", "name": "gross_billing"},
-            {"report_id": "10090352", "filter_id": "10146873", "name": "model_data"},
-            {"report_id": "10090354", "filter_id": "10146874", "name": "payment_trend"},
-            {"report_id": "10090356", "filter_id": "10146875", "name": "pdr3_calculator"},
-            {"report_id": "10090359", "filter_id": "10146876", "name": "quadrant_performance"},
-            {"report_id": "10090360", "filter_id": "10146877", "name": "rcm_productivity"},
+            {"report_id": "10090319", "filter_id": "10146864", "name": "ar_aging"},  # all_tableau
+            {"report_id": "10090320", "filter_id": "10146865", "name": "benefits_call_campaign"},  # all_tableau
+            {"report_id": "10090324", "filter_id": "10146867", "name": "charges_on_hold"},  # all_tableau
+            {"report_id": "10090325", "filter_id": "10146868", "name": "claim_stage_breakdown"},  # all_tableau
+            {"report_id": "10090326", "filter_id": "10147080", "name": "clearing_house_rejections"},  # all_tableau
+            {"report_id": "10090331", "filter_id": "10146869", "name": "client_billing_reports"},  # all_tableau
+            {"report_id": "10090333", "filter_id": "10146870", "name": "denial_trends"},  # all_tableau
+            {"report_id": "10090339", "filter_id": "10146871", "name": "deposits_for_invoicing"},  # all_tableau
+            {"report_id": "10090341", "filter_id": "10146872", "name": "gross_billing"},  # all_tableau
+            {"report_id": "10090352", "filter_id": "10146873", "name": "model_data"},  # all_tableau
+            {"report_id": "10090354", "filter_id": "10146874", "name": "payment_trend"},  # all_tableau
+            {"report_id": "10090356", "filter_id": "10146875", "name": "pdr3_calculator"},  # all_tableau
+            {"report_id": "10090359", "filter_id": "10146876", "name": "quadrant_performance"},  # all_tableau
+            {"report_id": "10090360", "filter_id": "10146877", "name": "rcm_productivity"},  # all_tableau
             {"report_id": "10090361", "filter_id": "10146878", "name": "rejected_at_payer"},
-            {"report_id": "10090363", "filter_id": "10146879", "name": "rev_rec_charges"},
-            {"report_id": "10090364", "filter_id": "10146880", "name": "rev_rec_payments"},
-            {"report_id": "10090368", "filter_id": "10146881", "name": "revamped_weekly_ar_worklists"},
-            {"report_id": "10090370", "filter_id": "10146882", "name": "user_time_spread"},
-            {"report_id": "10090371", "filter_id": "10146883", "name": "write_off_trend"},
+            {"report_id": "10090363", "filter_id": "10146879", "name": "rev_rec_charges"},  # all_tableau
+            {"report_id": "10090364", "filter_id": "10146880", "name": "rev_rec_payments"},  # all_tableau
+            {"report_id": "10090368", "filter_id": "10146881", "name": "revamped_weekly_ar_worklists"},  # all_tableau
+            {"report_id": "10090370", "filter_id": "10146882", "name": "user_time_spread"},  # all_tableau
+            {"report_id": "10090371", "filter_id": "10146883", "name": "write_off_trend"},  # all_tableau
         ]
     },
 }
