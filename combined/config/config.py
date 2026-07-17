@@ -56,7 +56,15 @@ INSTANCES = {
                 "filter_id": "10141937",
                 "name": "rev_rec_payments",
                 "account_filters": [{"account": "10023994", "filter_id": "10147270"}] #last_12_months
-            }
+            },
+            {"report_id": "10091708", "filter_id": "10147689", "name": "benefits_call_campaign"},
+            {"report_id": "10091711", "filter_id": "10147692", "name": "clearing_house_rejections"},
+            {"report_id": "10091714", "filter_id": "10147693", "name": "client_billing_reports"},
+            {"report_id": "10091718", "filter_id": "10147694", "name": "deposits_for_invoicing"},
+            {"report_id": "10091946", "filter_id": "10147700", "name": "model_data"},
+            {"report_id": "10091724", "filter_id": "10147702", "name": "quadrant_performance"},
+            {"report_id": "10091725", "filter_id": "10147705", "name": "rejected_at_payer"},
+            {"report_id": "10091726", "filter_id": "10147708", "name": "revamped_weekly_ar_worklists"}
         ],
     },
 
@@ -91,7 +99,14 @@ INSTANCES = {
             {"report_id": "10062066", "filter_id": "10147639", "name": "write_off_trend"},
             {"report_id": "10085814", "filter_id": "10147650", "name": "pdr3_calculator"},
             {"report_id": "10085817", "filter_id": "10147643", "name": "rev_rec_charges"},
-            {"report_id": "10085815", "filter_id": "10147642", "name": "rev_rec_payments"}
+            {"report_id": "10085815", "filter_id": "10147642", "name": "rev_rec_payments"},
+            {"report_id": "10062052", "filter_id": "10147630", "name": "benefits_call_campaign"},
+            {"report_id": "10062067", "filter_id": "10147635", "name": "clearing_house_rejections"},
+            {"report_id": "10074011", "filter_id": "10147638", "name": "client_billing_reports"},
+            {"report_id": "10075405", "filter_id": "10147653", "name": "deposits_for_invoicing"},
+            {"report_id": "10075127", "filter_id": "10147652", "name": "model_data"},
+            {"report_id": "10062068", "filter_id": "10147644", "name": "rejected_at_payer"},
+            {"report_id": "10062063", "filter_id": "10147641", "name": "revamped_weekly_ar_worklists"}
         ],
     },
 
