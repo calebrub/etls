@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS denial_trends_view;
-CREATE MATERIALIZED VIEW denial_trends_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS denial_trends_view AS
 WITH denial_trends_cte AS (
     SELECT
         dt.customer_account::varchar AS customer_account,
@@ -100,3 +99,5 @@ CREATE INDEX IF NOT EXISTS idx_denial_trends_account ON denial_trends_view(custo
 CREATE INDEX IF NOT EXISTS idx_denial_trends_instance_key ON denial_trends_view(instance_key);
 CREATE INDEX IF NOT EXISTS idx_denial_trends_received_date ON denial_trends_view(payment_received);
 CREATE INDEX IF NOT EXISTS idx_denial_trends_entered_date ON denial_trends_view(charge_entered_date);
+
+REFRESH MATERIALIZED VIEW denial_trends_view;

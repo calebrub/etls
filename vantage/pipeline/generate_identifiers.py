@@ -34,10 +34,12 @@ def handle_report_response(response_text, customer_account, report_name):
     # Parse XML response
     root = ET.fromstring(response_text)
     ns = {'ns1': 'http://www.collaboratemd.com/api/v1/'}
-    status = root.find('ns1:Status', ns).text
-    identifier = root.find('ns1:Identifier', ns).text
-    
+    status_element = root.find('ns1:Status', ns)
+    identifier_element = root.find('ns1:Identifier', ns)
     status_message_element = root.find('ns1:StatusMessage', ns)
+
+    status = status_element.text if status_element is not None else ""
+    identifier = identifier_element.text if identifier_element is not None else None
     status_message = status_message_element.text if status_message_element is not None else ""
     print('identifier', identifier, "| StatusMessage", status_message)
 

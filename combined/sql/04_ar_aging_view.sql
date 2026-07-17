@@ -1,10 +1,10 @@
-DROP MATERIALIZED VIEW IF EXISTS ar_aging_view;
-CREATE MATERIALIZED VIEW ar_aging_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS ar_aging_view AS
 WITH ar_aging_cte AS (
     SELECT
         aa.customer_account,
         aa.charge_id,
         aa.claim_id,
+        aa.claim_status,
         aa.claim_first_billed_date,
         aa.charge_from_date,
         aa.charge_to_date,
@@ -126,3 +126,5 @@ FROM ar_aging_cte ac
 
 CREATE INDEX IF NOT EXISTS idx_ar_aging_account ON ar_aging_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_ar_aging_instance_key ON ar_aging_view(instance_key);
+
+REFRESH MATERIALIZED VIEW ar_aging_view;

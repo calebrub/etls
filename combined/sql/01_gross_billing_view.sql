@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS gross_billing_view;
-CREATE MATERIALIZED VIEW gross_billing_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS gross_billing_view AS
 WITH gross_billing_cte AS (
     SELECT
         gb.customer_account::varchar AS customer_account,
@@ -109,3 +108,5 @@ CREATE INDEX IF NOT EXISTS idx_gross_billing_account ON gross_billing_view(custo
 CREATE INDEX IF NOT EXISTS idx_gross_billing_entered_date ON gross_billing_view(charge_entered_date);
 CREATE INDEX IF NOT EXISTS idx_gross_billing_billed_date ON gross_billing_view(claim_first_billed_date);
 CREATE INDEX IF NOT EXISTS idx_gross_billing_instance_key ON gross_billing_view(instance_key);
+
+REFRESH MATERIALIZED VIEW gross_billing_view;

@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS pdr3_calculator_view CASCADE;
-CREATE MATERIALIZED VIEW pdr3_calculator_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS pdr3_calculator_view AS
 WITH base AS (
     SELECT
         p.*,
@@ -114,3 +113,5 @@ CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_entered ON pdr3_calculator_view(p
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_instance_key ON pdr3_calculator_view(instance_key);
 -- Index the Unique ID used for Tableau relationships
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_unique_id ON pdr3_calculator_view(unique_id);
+
+REFRESH MATERIALIZED VIEW pdr3_calculator_view;

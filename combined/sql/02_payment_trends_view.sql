@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS payment_trends_view;
-CREATE MATERIALIZED VIEW payment_trends_view
+CREATE MATERIALIZED VIEW IF NOT EXISTS payment_trends_view
             (customer_account, facility_name, office_name, practice_name, charge_entered_date, charge_from_date,
              charge_to_date, patient_full_name, payment_source, payment_allowed_amount, charge_patient_id, charge_id,
              charge_rev_code, charge_cpt_code, type_of_bill, charge_claim_id, payer_name, primary_payer_member_id,
@@ -79,3 +78,5 @@ CREATE INDEX IF NOT EXISTS idx_payment_trends_account ON payment_trends_view(cus
 CREATE INDEX IF NOT EXISTS idx_payment_trends_received_date ON payment_trends_view(payment_received);
 CREATE INDEX IF NOT EXISTS idx_payment_trends_entered_date ON payment_trends_view(charge_entered_date);
 CREATE INDEX IF NOT EXISTS idx_payment_trends_instance_key ON payment_trends_view(instance_key);
+
+REFRESH MATERIALIZED VIEW payment_trends_view;

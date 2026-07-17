@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS quadrant_performance_view;
-CREATE MATERIALIZED VIEW quadrant_performance_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS quadrant_performance_view AS
 WITH qp_cte AS (
     SELECT
         qp.customer_account::varchar AS customer_account,
@@ -117,3 +116,5 @@ CREATE INDEX IF NOT EXISTS idx_quadrant_perf_account ON quadrant_performance_vie
 CREATE INDEX IF NOT EXISTS idx_quadrant_perf_instance_key ON quadrant_performance_view(instance_key);
 CREATE INDEX IF NOT EXISTS idx_quadrant_perf_received_date ON quadrant_performance_view(payment_received);
 CREATE INDEX IF NOT EXISTS idx_quadrant_perf_unique_id ON quadrant_performance_view(unique_id);
+
+REFRESH MATERIALIZED VIEW quadrant_performance_view;

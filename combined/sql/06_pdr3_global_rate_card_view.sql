@@ -1,8 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS rev_rec_payments_view;
-DROP MATERIALIZED VIEW IF EXISTS rev_rec_charges_view CASCADE;
-DROP MATERIALIZED VIEW IF EXISTS rev_rec_charges_base_view CASCADE;
-DROP MATERIALIZED VIEW IF EXISTS pdr3_global_rate_card_view;
-CREATE MATERIALIZED VIEW pdr3_global_rate_card_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS pdr3_global_rate_card_view AS
 SELECT
     p.practice_name,
     p.facility_name,
@@ -49,3 +45,5 @@ CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_location ON pdr3_global_rate_car
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_payer_class ON pdr3_global_rate_card_view(payer_class);
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_loc ON pdr3_global_rate_card_view(loc);
 CREATE INDEX IF NOT EXISTS idx_pdr3_global_rate_instance_key ON pdr3_global_rate_card_view(instance_key);
+
+REFRESH MATERIALIZED VIEW pdr3_global_rate_card_view;

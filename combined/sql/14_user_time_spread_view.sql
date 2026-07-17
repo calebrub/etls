@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS user_time_spread_view;
-CREATE MATERIALIZED VIEW user_time_spread_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS user_time_spread_view AS
 SELECT
     uts.customer_account::varchar AS customer_account,
     uts.instance_key,
@@ -19,3 +18,5 @@ FROM user_time_spread uts;
 CREATE INDEX IF NOT EXISTS idx_user_time_spread_account ON user_time_spread_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_user_time_spread_instance_key ON user_time_spread_view(instance_key);
 CREATE INDEX IF NOT EXISTS idx_user_time_spread_username ON user_time_spread_view(audit_username);
+
+REFRESH MATERIALIZED VIEW user_time_spread_view;

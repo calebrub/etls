@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rev_rec_charges_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS rev_rec_charges_view AS
 WITH base AS (
     SELECT
         rrc.customer_account::varchar                                                                  AS customer_account,
@@ -70,3 +70,5 @@ LEFT JOIN pdr3_global_rate_card_view p3 ON p3.unique_id = e.unique_id;
 -- Index on the materialized view for fast lookups
 CREATE INDEX ON rev_rec_charges_view (unique_id);
 CREATE INDEX ON rev_rec_charges_view (abs_unique_id);
+
+REFRESH MATERIALIZED VIEW rev_rec_charges_view;

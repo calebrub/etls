@@ -138,16 +138,16 @@ def _parse_report_xml(response_text: str) -> Optional[dict]:
     identifier_elem = root.find('ns1:Identifier', API_NAMESPACE)
     status_message_elem = root.find('ns1:StatusMessage', API_NAMESPACE)
 
-    if status_elem is None or identifier_elem is None or status_message_elem is None:
+    if status_elem is None or status_message_elem is None:
         logging.error(
-            "Missing required XML elements in response (Status=%s, Identifier=%s, StatusMessage=%s)",
-            status_elem, identifier_elem, status_message_elem,
+            "Missing required XML elements in response (Status=%s, StatusMessage=%s)",
+            status_elem, status_message_elem,
         )
         return None
 
     return {
         'status': status_elem.text,
-        'identifier': identifier_elem.text,
+        'identifier': identifier_elem.text if identifier_elem is not None else None,
         'status_message': status_message_elem.text,
     }
 
@@ -472,7 +472,9 @@ def write_runs_summary(results_list: list) -> None:
     os.makedirs(csv_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     csv_file = os.path.join(csv_dir, f"identifier_summary_{timestamp}.csv")
-    latest_csv_file = os.path.join(csv_dir, "latest_identifier_summary.csv")
+    env_instance = os.getenv('INSTANCE_KEY', '')
+    suffix = f"_{env_instance}" if env_instance else ""
+    latest_csv_file = os.path.join(csv_dir, f"latest_identifier_summary{suffix}.csv")
 
     try:
         _write_csv(csv_file, _SUMMARY_FIELDS, results_list)

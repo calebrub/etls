@@ -99,13 +99,17 @@ def acquire_run_lock():
     Returns the open file handle (which must stay referenced for the process
     lifetime to hold the lock). Exits the process cleanly if another run holds it.
     """
-    lock_fh = open(LOCK_FILE, 'w')
+    env_instance = os.getenv('INSTANCE_KEY', '')
+    suffix = f"_{env_instance}" if env_instance else ""
+    lock_file = os.environ.get('ETL_LOCK_FILE', f'/tmp/fetch_and_load_reports{suffix}.lock')
+
+    lock_fh = open(lock_file, 'w')
     try:
         fcntl.flock(lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         logging.error(
             "Another fetch_and_load_reports run is already in progress "
-            "(lock held on %s). Exiting to avoid overlapping runs.", LOCK_FILE
+            "(lock held on %s). Exiting to avoid overlapping runs.", lock_file
         )
         sys.exit(0)
     lock_fh.write(str(os.getpid()))
@@ -431,12 +435,9 @@ class FetchSession:
         instance-specific subdirectory so that accounts from different
         instances never share a file.
         """
-        if instance_count > 1:
-            instance_dir = os.path.join(csv_dir, instance_key)
-            os.makedirs(instance_dir, exist_ok=True)
-            file_path = os.path.join(instance_dir, f"{report_name}.csv")
-        else:
-            file_path = os.path.join(csv_dir, f"{report_name}.csv")
+        instance_dir = os.path.join(csv_dir, instance_key)
+        os.makedirs(instance_dir, exist_ok=True)
+        file_path = os.path.join(instance_dir, f"{report_name}.csv")
 
         lock = self.get_csv_lock(file_path)
         with lock:
@@ -551,7 +552,9 @@ def write_fetch_summary(results_list: list) -> None:
     os.makedirs(summary_dir, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     csv_file = os.path.join(summary_dir, f"fetch_summary_{timestamp}.csv")
-    latest_csv_file = os.path.join(summary_dir, "latest_fetch_summary.csv")
+    env_instance = os.getenv('INSTANCE_KEY', '')
+    suffix = f"_{env_instance}" if env_instance else ""
+    latest_csv_file = os.path.join(summary_dir, f"latest_fetch_summary{suffix}.csv")
 
     # Fill defaults for rows that never reached the load phase
     for row in results_list:
@@ -1486,12 +1489,13 @@ def load_table_streaming(
                 insert_query = f"""
                     WITH ins AS (
                         INSERT INTO "{schema}"."{table_name}" ({cols_str})
-                        SELECT {select_str}
+                        SELECT DISTINCT ON (s.row_hash) {select_str}
                         FROM "{schema}"."{staging_table}" s
                         WHERE NOT EXISTS (
                             SELECT 1 FROM "{schema}"."{table_name}" t
                             WHERE t.row_hash = s.row_hash
                         )
+                        ORDER BY s.row_hash
                         RETURNING instance_key, customer_account
                     )
                     SELECT instance_key, customer_account, count(*) AS n
@@ -1505,12 +1509,13 @@ def load_table_streaming(
                 insert_query = f"""
                     WITH ins AS (
                         INSERT INTO "{schema}"."{table_name}" ({cols_str})
-                        SELECT {select_str}
+                        SELECT DISTINCT ON (s.row_hash) {select_str}
                         FROM "{schema}"."{staging_table}" s
                         WHERE NOT EXISTS (
                             SELECT 1 FROM "{schema}"."{table_name}" t
                             WHERE t.row_hash = s.row_hash
                         )
+                        ORDER BY s.row_hash
                         RETURNING 1
                     )
                     SELECT count(*) FROM ins;
@@ -1628,10 +1633,13 @@ def load_tables_to_db(
 
                 else:
                     # Incremental path — use a staging table + hash-based anti-join
-                    staging_table = f"{table_name}_staging"
+                    env_instance = os.getenv('INSTANCE_KEY', '')
+                    suffix = f"_{env_instance}" if env_instance else ""
+                    staging_table = f"{table_name}{suffix}_staging"
                     try:
                         ensure_row_hash_column(engine, schema, table_name)
                         df['row_hash'] = compute_row_hash(df)
+                        df = df.drop_duplicates(subset=['row_hash'])
 
                         # Track total rows per account before the insert
                         total_counts: dict = {}
@@ -1782,12 +1790,9 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Tru
     )
 
     instance_list = config_loader.list_instances()
-    if len(instance_list) > 1:
-        csv_files = []
-        for key in instance_list:
-            csv_files.extend(glob.glob(f"csv_files/{key}/*.csv"))
-    else:
-        csv_files = glob.glob("csv_files/*.csv")
+    csv_files = []
+    for key in instance_list:
+        csv_files.extend(glob.glob(f"csv_files/{key}/*.csv"))
 
     logging.info("\n" + "=" * 80)
     logging.info("ETL PROCESSING PHASE (TABLE-BY-TABLE)")

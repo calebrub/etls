@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS claim_stage_breakdown_view;
-CREATE MATERIALIZED VIEW claim_stage_breakdown_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS claim_stage_breakdown_view AS
 WITH claim_stage_cte AS (
     SELECT
         csb.customer_account::varchar AS customer_account,
@@ -70,3 +69,5 @@ CREATE INDEX IF NOT EXISTS idx_claim_stage_account ON claim_stage_breakdown_view
 CREATE INDEX IF NOT EXISTS idx_claim_stage_instance_key ON claim_stage_breakdown_view(instance_key);
 CREATE INDEX IF NOT EXISTS idx_claim_stage_entered_date ON claim_stage_breakdown_view(charge_entered_date);
 CREATE INDEX IF NOT EXISTS idx_claim_stage_unique_id ON claim_stage_breakdown_view(unique_id);
+
+REFRESH MATERIALIZED VIEW claim_stage_breakdown_view;

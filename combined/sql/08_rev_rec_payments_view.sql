@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW rev_rec_payments_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS rev_rec_payments_view AS
 WITH rev_rec_payments_cte AS (
     SELECT
         rrp.customer_account::varchar AS customer_account,
@@ -63,3 +63,5 @@ CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_account ON rev_rec_payments_view
 CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_instance_key ON rev_rec_payments_view(instance_key);
 CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_received_date ON rev_rec_payments_view(payment_received);
 CREATE INDEX IF NOT EXISTS idx_rev_rec_payments_unique_id ON rev_rec_payments_view(unique_id);
+
+REFRESH MATERIALIZED VIEW rev_rec_payments_view;

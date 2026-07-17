@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS rcm_productivity_view;
-CREATE MATERIALIZED VIEW rcm_productivity_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS rcm_productivity_view AS
 WITH rcm_prod_cte AS (
     SELECT
         rp.customer_account::varchar AS customer_account,
@@ -56,3 +55,5 @@ CREATE INDEX IF NOT EXISTS idx_rcm_prod_user ON rcm_productivity_view(created_by
 CREATE INDEX IF NOT EXISTS idx_rcm_prod_claim_id ON rcm_productivity_view(claim_id);
 CREATE INDEX IF NOT EXISTS idx_rcm_prod_billed_date ON rcm_productivity_view(claim_first_billed_date);
 CREATE INDEX IF NOT EXISTS idx_rcm_prod_note_date ON rcm_productivity_view(last_note_date_max);
+
+REFRESH MATERIALIZED VIEW rcm_productivity_view;

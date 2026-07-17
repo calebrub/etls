@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS write_off_trend_view;
-CREATE MATERIALIZED VIEW write_off_trend_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS write_off_trend_view AS
 WITH wot_cte AS (
     SELECT
         wot.customer_account::varchar AS customer_account,
@@ -59,3 +58,5 @@ CREATE INDEX IF NOT EXISTS idx_write_off_trend_account ON write_off_trend_view(c
 CREATE INDEX IF NOT EXISTS idx_write_off_trend_instance_key ON write_off_trend_view(instance_key);
 CREATE INDEX IF NOT EXISTS idx_write_off_trend_received_date ON write_off_trend_view(payment_received);
 CREATE INDEX IF NOT EXISTS idx_write_off_trend_entered_date ON write_off_trend_view(charge_entered_date);
+
+REFRESH MATERIALIZED VIEW write_off_trend_view;

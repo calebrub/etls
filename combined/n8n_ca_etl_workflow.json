@@ -1,0 +1,280 @@
+{
+  "name": "CA ETL (with Summary)",
+  "nodes": [
+    {
+      "parameters": {
+        "command": "cd /home/azureuser/etls/combined && INSTANCE_KEY=ca python3 generate_identifiers.py"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        32,
+        672
+      ],
+      "id": "367dce77-fabb-4ecd-8e0b-c1aa7c88ec9f",
+      "name": "Run Generate Identifiers Script",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/azureuser/etls/combined/csv_files/run_summaries/latest_identifier_summary_ca.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        256,
+        672
+      ],
+      "id": "24ea3a3e-b254-45c4-ae7a-13e53441781e",
+      "name": "Read Identifier Summary CSV"
+    },
+    {
+      "parameters": {
+        "fileFormat": "csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        464,
+        672
+      ],
+      "id": "a0aa7157-0f03-4397-b2a7-41d0218d5163",
+      "name": "Parse Identifier Summary CSV"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        688,
+        672
+      ],
+      "id": "4a11b3e3-7887-415f-ad8c-39722a18afb8",
+      "name": "Wait 2 Minutes"
+    },
+    {
+      "parameters": {
+        "command": "cd /home/azureuser/etls/combined && INSTANCE_KEY=ca python3 fetch_and_load_reports.py "
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        912,
+        672
+      ],
+      "id": "90d7471c-5b4a-42a7-9ff3-5b2a5641209b",
+      "name": "Run Fetch and Load Reports Script"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -192,
+        672
+      ],
+      "id": "a65f3fd7-9759-4e99-b9ab-d7be87518d41",
+      "name": "Daily 1 AM Schedule Trigger"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -192,
+        480
+      ],
+      "id": "8248e28a-c798-44f1-bb0b-bf09f898c291",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/home/azureuser/etls/combined/csv_files/fetch_summaries/latest_fetch_summary_ca.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1136,
+        672
+      ],
+      "id": "2d1ef1a3-a001-447a-8f81-229bbbe536c4",
+      "name": "Read Fetch Summary CSV"
+    },
+    {
+      "parameters": {
+        "fileFormat": "csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        672
+      ],
+      "id": "5f1bc731-97ea-46b6-a83d-6b5860d5bfa4",
+      "name": "Parse Fetch Summary CSV"
+    },
+    {
+      "parameters": {
+        "jsCode": "const table1 = $('Parse Identifier Summary CSV').all();\nconst table2 = $('Parse Fetch Summary CSV').all();\n\nconst map2 = {};\nfor (const item of table2) {\n  const data = item.json;\n  const key = `${data.instance_key}_${data.customer_account}_${data.report_name}`.toLowerCase();\n  map2[key] = data;\n}\n\nconst joined = [];\nfor (const item of table1) {\n  const data = item.json;\n  const key = `${data.instance_key}_${data.customer_account}_${data.report_name}`.toLowerCase();\n  const match = map2[key] || {};\n  \n  joined.push({\n    json: {\n      instance_key: data.instance_key,\n      customer_account: data.customer_account,\n      customer_name: data.customer_name || match.customer_name,\n      report_name: data.report_name,\n      report_id: data.report_id || match.report_id,\n      filter_id: data.filter_id,\n      run_http_status: data.http_status,\n      run_api_status: data.api_status,\n      identifier: data.identifier,\n      run_status_message: data.status_message,\n      run_retries: data.retries,\n      db_updated: data.db_updated,\n      run_time_taken: data.time_taken,\n      fetch_http_status: match.http_status,\n      fetch_api_status: match.api_status,\n      fetch_status_message: match.status_message,\n      fetch_retries: match.retries,\n      rows_fetched: match.rows_fetched,\n      file_written: match.file_written,\n      load_status: match.load_status,\n      rows_inserted: match.rows_inserted,\n      rows_duplicate: match.rows_duplicate,\n      load_error: match.load_error\n    }\n  });\n}\n\nreturn joined;"
+      },
+      "id": "e458e0a3-a9f8-410a-b286-90516b328a9b",
+      "name": "Join Run and Fetch Summaries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "csv",
+        "options": {}
+      },
+      "id": "7662c12a-3642-4f3d-a51f-d513bf366a7b",
+      "name": "Convert Joined Table to CSV",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        672
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run Generate Identifiers Script": {
+      "main": [
+        [
+          {
+            "node": "Read Identifier Summary CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Identifier Summary CSV": {
+      "main": [
+        [
+          {
+            "node": "Parse Identifier Summary CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Identifier Summary CSV": {
+      "main": [
+        [
+          {
+            "node": "Wait 2 Minutes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Run Fetch and Load Reports Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 1 AM Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Generate Identifiers Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Generate Identifiers Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Fetch and Load Reports Script": {
+      "main": [
+        [
+          {
+            "node": "Read Fetch Summary CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Fetch Summary CSV": {
+      "main": [
+        [
+          {
+            "node": "Parse Fetch Summary CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Fetch Summary CSV": {
+      "main": [
+        [
+          {
+            "node": "Join Run and Fetch Summaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join Run and Fetch Summaries": {
+      "main": [
+        [
+          {
+            "node": "Convert Joined Table to CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "c17c0b166202ac1d595a1927b9531d214d1fb0e9ebcc7e1a88fc4ad5ae45a494"
+  }
+}

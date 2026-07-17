@@ -1,5 +1,4 @@
-DROP MATERIALIZED VIEW IF EXISTS charges_on_hold_view;
-CREATE MATERIALIZED VIEW charges_on_hold_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS charges_on_hold_view AS
 WITH charges_on_hold_cte AS (
     SELECT
         coh.customer_account::varchar AS customer_account,
@@ -82,3 +81,5 @@ CREATE INDEX IF NOT EXISTS idx_charges_on_hold_instance_key ON charges_on_hold_v
 
 -- Cluster the data physically by entered date to speed up chronological extracts
 CLUSTER gross_billing_view USING idx_gross_billing_entered_date;
+
+REFRESH MATERIALIZED VIEW charges_on_hold_view;

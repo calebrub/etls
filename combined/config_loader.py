@@ -94,6 +94,17 @@ class ConfigLoader:
             # Python module based multi-instance config
             raw_instances = getattr(self._py_config, 'INSTANCES') or {}
 
+            # Filter by INSTANCE_KEY environment variable if present
+            env_instance_filter = os.getenv('INSTANCE_KEY')
+            if env_instance_filter:
+                if env_instance_filter in raw_instances:
+                    raw_instances = {env_instance_filter: raw_instances[env_instance_filter]}
+                else:
+                    raise ValueError(
+                        f"INSTANCE_KEY environment variable set to '{env_instance_filter}', "
+                        f"but that key was not found in config/config.py."
+                    )
+
             for key, raw in raw_instances.items():
                 # allow env overrides using SECTION_KEY style: INSTANCE_<KEY>_FIELD
                 section_prefix = f'INSTANCE_{key}'.upper()
