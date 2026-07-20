@@ -22,7 +22,7 @@ WITH charges_on_hold_cte AS (
         coh.charge_set_to_status,
         coh.created_at,
         -- cleaned codes for LOC lookup
-        ltrim(split_part(regexp_replace(coh.charge_rev_code, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
+        ltrim(split_part(regexp_replace(coh.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(coh.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         -- derived fields
         coh.charge_entered_date::date AS date_charge_entered,

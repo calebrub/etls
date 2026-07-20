@@ -29,7 +29,7 @@ FROM pdr3_calculator_view p
 JOIN facility_rates fr ON
             p.unique_id = fr.unique_id
 -- only include usable rows (important)
-WHERE p.status = 'INCLUDE' AND upper(p.charge_rev_code) NOT IN ('INT', 'INTEREST',  'INTCHRG')
+WHERE p.status = 'INCLUDE' AND upper(p.charge_rev_code::text) NOT IN ('INT', 'INTEREST',  'INTCHRG')
 
 GROUP BY
     p.practice_name,

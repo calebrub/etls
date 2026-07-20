@@ -70,7 +70,7 @@ SELECT
     pnc.payer_code AS payer_class,
     instance_key
 FROM payment_trend pt
-LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = ltrim(split_part(regexp_replace(pt.charge_rev_code, '\.0$', ''), ' ', 1), '0')
+LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = ltrim(split_part(regexp_replace(pt.charge_rev_code::text, '\.0$', ''), ' ', 1), '0')
 LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = ltrim(split_part(regexp_replace(pt.charge_cpt_code, '\.0$', ''), ' ', 1), '0')
 LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = pt.charge_primary_payer_name;
 

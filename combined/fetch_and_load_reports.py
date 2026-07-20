@@ -503,7 +503,19 @@ def collect_fetch_tasks(
         for customer in customers:
             all_report_names.update(report_matrix.get(customer, {}).keys())
 
+        # Determine which reports to skip loading for this instance
+        skip_load_reports = {
+            r["name"] for r in config_loader.get_report_configs(instance_key=instance_key)
+            if r.get("skip_load") or r.get("skip")
+        }
+
         for report_name in sorted(all_report_names):
+            if report_name in skip_load_reports:
+                logging.info(
+                    "Skipping fetch/load for report '%s' as configured for instance %s.",
+                    report_name, instance_key
+                )
+                continue
             for customer_id in customers:
                 report_id = report_matrix.get(customer_id, {}).get(report_name)
                 if not report_id:
@@ -1792,7 +1804,20 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Tru
     instance_list = config_loader.list_instances()
     csv_files = []
     for key in instance_list:
-        csv_files.extend(glob.glob(f"csv_files/{key}/*.csv"))
+        # Determine which reports to skip loading for this instance
+        skip_load_reports = {
+            r["name"] for r in config_loader.get_report_configs(instance_key=key)
+            if r.get("skip_load") or r.get("skip")
+        }
+        for f in glob.glob(f"csv_files/{key}/*.csv"):
+            table_name = to_snake_case(os.path.splitext(os.path.basename(f))[0])
+            if table_name in skip_load_reports:
+                logging.info(
+                    "Skipping CSV file '%s' as it is configured to skip loading.",
+                    f
+                )
+                continue
+            csv_files.append(f)
 
     logging.info("\n" + "=" * 80)
     logging.info("ETL PROCESSING PHASE (TABLE-BY-TABLE)")

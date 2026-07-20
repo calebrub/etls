@@ -525,6 +525,12 @@ def run_all_reports(max_workers: Optional[int] = None) -> None:
         logging.info("=" * 80)
 
         for report_config in config_loader.get_report_configs(instance_key=instance_key):
+            if report_config.get("skip_run") or report_config.get("skip"):
+                logging.info(
+                    "Skipping API submission/run for report '%s' (ID %s) as configured.",
+                    report_config["name"], report_config["report_id"]
+                )
+                continue
             generate_report_for_all_accounts(
                 report_id=report_config["report_id"],
                 filter_id=report_config["filter_id"],

@@ -24,7 +24,7 @@ WITH denial_trends_cte AS (
         dt.payer_name,
         dt.created_at,
         -- cleaned codes for LOC lookup
-        ltrim(split_part(regexp_replace(dt.charge_rev_code, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
+        ltrim(split_part(regexp_replace(dt.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(dt.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         -- numeric cleaning
         NULLIF(replace(replace(dt.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,

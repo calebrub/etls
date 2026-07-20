@@ -34,7 +34,7 @@ WITH gross_billing_cte AS (
         to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'Month') AS claim_first_billed_month,
         to_char(gb.claim_first_billed_date::date::timestamp with time zone, 'YYYY') AS claim_first_billed_year,
         -- cleaned codes for LOC lookup
-        ltrim(split_part(regexp_replace(gb.charge_rev_code, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
+        ltrim(split_part(regexp_replace(gb.charge_rev_code::text, '\.0$', ''), ' ', 1), '0') AS clean_rev_code,
         ltrim(split_part(regexp_replace(gb.charge_cpt_code, '\.0$', ''), ' ', 1), '0') AS clean_cpt_code,
         NULLIF(replace(replace(gb.charge_amount::text, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
         gb.claim_first_billed_date::date - EXTRACT(dow FROM gb.claim_first_billed_date::date)::integer AS first_billed_week_date,
