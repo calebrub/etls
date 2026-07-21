@@ -1,4 +1,4 @@
-CREATE MATERIALIZED VIEW IF NOT EXISTS leenxa.opportunities_materialized_view AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS leenxa.opportunities_view AS
 SELECT 
   o.id AS opportunity_id,
   o."opportunityName" AS opportunity_name,

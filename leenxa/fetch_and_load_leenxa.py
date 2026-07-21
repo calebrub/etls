@@ -235,7 +235,7 @@ def main():
             logging.info(f"Sync complete for {src_table}. Total rows processed: {total_loaded}")
             
         # 5. Create / Refresh Materialized View
-        sql_view_path = os.path.join(base_dir, "sql", "01_opportunities_materialized_view.sql")
+        sql_view_path = os.path.join(base_dir, "sql", "01_opportunities_view.sql")
         if os.path.exists(sql_view_path):
             logging.info("Executing materialized view script...")
             with open(sql_view_path, 'r') as f:
@@ -247,7 +247,7 @@ def main():
             
             # Then execute refresh
             logging.info("Refreshing materialized view...")
-            dest_cur.execute(sql.SQL('REFRESH MATERIALIZED VIEW {}.opportunities_materialized_view;').format(
+            dest_cur.execute(sql.SQL('REFRESH MATERIALIZED VIEW {}.opportunities_view;').format(
                 sql.Identifier(dest_schema)
             ))
             dest_conn.commit()
