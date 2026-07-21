@@ -21,17 +21,35 @@ class TeeStream:
 
     The file is opened in append mode so successive runs accumulate in the
     same log file rather than overwriting it.
+
+    Console output is capped to avoid n8n/process buffer overflow errors.
     """
 
-    def __init__(self, filename: str, stream):
+    def __init__(self, filename: str, stream, max_console_bytes: int = 800000):
         self.stream = stream
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         self.file = open(filename, 'a', encoding='utf-8')
+        self.max_console_bytes = max_console_bytes
+        self.bytes_written = 0
+        self.truncated = False
 
     def write(self, message: str) -> None:
-        self.stream.write(message)
         self.file.write(message)
         self.file.flush()
+
+        if not self.truncated:
+            try:
+                msg_bytes = len(message.encode('utf-8', errors='ignore'))
+            except Exception:
+                msg_bytes = len(message)
+                
+            if self.bytes_written + msg_bytes > self.max_console_bytes:
+                self.stream.write("\n... [CONSOLE LOGS TRUNCATED TO PREVENT BUFFER OVERFLOW - SEE FULL LOGS IN FILE] ...\n")
+                self.stream.flush()
+                self.truncated = True
+            else:
+                self.stream.write(message)
+                self.bytes_written += msg_bytes
 
     def flush(self) -> None:
         self.stream.flush()
