@@ -1,0 +1,81 @@
+{
+  "name": "Leenxa ETL Pipeline",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        240
+      ],
+      "id": "manual-trigger-id",
+      "name": "Manual Trigger"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 * * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        400
+      ],
+      "id": "schedule-trigger-id",
+      "name": "Hourly Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "command": "cd /home/azureuser/etls && PYTHONPATH=. python3 leenxa/fetch_and_load_leenxa.py"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        500,
+        320
+      ],
+      "id": "execute-command-id",
+      "name": "Run Leenxa Pipeline"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Leenxa Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hourly Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Leenxa Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "instanceId": "leenxa-etl-pipeline-instance"
+  }
+}
