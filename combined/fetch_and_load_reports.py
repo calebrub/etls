@@ -1089,6 +1089,34 @@ def truncate_table(engine, schema: str, table_name: str) -> None:
     logging.info("✓ Truncated %s.%s", schema, table_name)
 
 
+def delete_instance_data(engine, schema: str, table_name: str, instance_list: list) -> None:
+    """Delete all rows for the given instances from the table if instance_key exists, otherwise truncate."""
+    if not instance_list:
+        return
+    db_struct = get_db_structure(engine, schema, table_name)
+    if db_struct is None:
+        return
+
+    has_inst_key = any(col == 'instance_key' for col, _ in db_struct)
+    if not has_inst_key:
+        truncate_table(engine, schema, table_name)
+        return
+
+    with engine.begin() as conn:
+        if len(instance_list) == 1:
+            conn.execute(
+                text(f'DELETE FROM "{schema}"."{table_name}" WHERE instance_key = :inst'),
+                {"inst": instance_list[0]}
+            )
+            logging.info("  Cleared existing rows for instance '%s' in %s", instance_list[0], table_name)
+        else:
+            conn.execute(
+                text(f'DELETE FROM "{schema}"."{table_name}" WHERE instance_key IN :insts'),
+                {"insts": tuple(instance_list)}
+            )
+            logging.info("  Cleared existing rows for instances %s in %s", instance_list, table_name)
+
+
 def coerce_df_to_db_schema(df: pd.DataFrame, db_struct: list) -> pd.DataFrame:
     """
     Coerce each DataFrame column to the type declared in the DB schema.
@@ -1593,13 +1621,14 @@ def load_tables_to_db(
     schema: str,
     tables: dict,
     results_index: Optional[dict] = None,
-    incremental: bool = True,
+    incremental: bool = False,
+    instance_list: Optional[list] = None,
 ) -> None:
     """
     Load processed DataFrames into PostgreSQL.
 
     - ``incremental=True``: append only rows whose ``row_hash`` is new.
-    - ``incremental=False``: truncate the table first, then bulk-COPY all rows.
+    - ``incremental=False``: clear active instance data first, then bulk-COPY all rows.
     """
     for table_name, df in tables.items():
         max_retries = 3
@@ -1615,7 +1644,10 @@ def load_tables_to_db(
                 if not incremental or db_struct is None:
                     # Full-refresh path (or brand-new table)
                     if db_struct is not None:
-                        truncate_table(engine, schema, table_name)
+                        if instance_list:
+                            delete_instance_data(engine, schema, table_name, instance_list)
+                        else:
+                            truncate_table(engine, schema, table_name)
 
                     df['row_hash'] = compute_row_hash(df)
 
@@ -1779,7 +1811,7 @@ def load_tables_to_db(
 # Main ETL orchestration
 # ---------------------------------------------------------------------------
 
-def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = True) -> None:
+def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = False) -> None:
     """
     Read all CSVs written by the fetch phase and load them into PostgreSQL.
 
@@ -1880,7 +1912,12 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Tru
             continue
 
         logging.info("Loading data for '%s'...", table_name)
-        load_tables_to_db(engine, schema, tables, results_index=results_index, incremental=incremental)
+        load_tables_to_db(
+            engine, schema, tables,
+            results_index=results_index,
+            incremental=incremental,
+            instance_list=instance_list
+        )
 
         del tables
         gc.collect()
@@ -1906,9 +1943,9 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Fetch and load reports ETL pipeline")
     parser.add_argument(
-        '--full-refresh',
+        '--incremental',
         action='store_true',
-        help="Perform a full refresh — truncate tables before loading",
+        help="Perform an incremental load (upserting unique rows only)",
     )
     parser.add_argument(
         '--workers',
@@ -1919,15 +1956,13 @@ def main() -> None:
     args, _ = parser.parse_known_args()
 
     # Determine load strategy
-    config_incremental = postgres_config.get('incremental', True)
-    incremental = not args.full_refresh and config_incremental
+    config_incremental = postgres_config.get('incremental', False)
+    incremental = args.incremental or config_incremental
 
-    if args.full_refresh:
-        logging.info("⚡ FORCING FULL REFRESH (truncating tables before loading)")
-    elif not incremental:
-        logging.info("⚡ Configured for FULL REFRESH (truncating tables before loading)")
-    else:
+    if incremental:
         logging.info("Running INCREMENTAL LOAD (upserting unique rows only)")
+    else:
+        logging.info("⚡ Running FULL REFRESH (truncating tables before loading)")
 
     results_list = fetch_reports_to_csv(max_workers=args.workers)
     load_csvs_to_db(results_list=results_list, incremental=incremental)
