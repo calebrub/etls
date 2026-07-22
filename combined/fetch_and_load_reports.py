@@ -1287,7 +1287,7 @@ def update_results_list(
 # Extract & Transform
 # ---------------------------------------------------------------------------
 
-def extract_and_transform_csvs(engine, schema: str, csv_files: list) -> dict:
+def extract_and_transform_csvs(engine, schema: str, csv_files: list, nrows: Optional[int] = None) -> dict:
     """
     Read CSV files, clean column names, coerce types, and merge DataFrames
     that map to the same table name.
@@ -1298,7 +1298,7 @@ def extract_and_transform_csvs(engine, schema: str, csv_files: list) -> dict:
 
     for csv_file in csv_files:
         table_name = to_snake_case(os.path.splitext(os.path.basename(csv_file))[0])
-        df = pd.read_csv(csv_file, low_memory=False)
+        df = pd.read_csv(csv_file, low_memory=False, nrows=nrows)
 
         # Preserve the instance_key column before renaming (it uses a reserved name
         # but is a legitimate source column added by the fetch phase)
@@ -1871,7 +1871,7 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Fal
 
     for table_name, table_csv_files in files_by_table.items():
         logging.info("Pre-validating schema for table: '%s'...", table_name)
-        tables = extract_and_transform_csvs(engine, schema, table_csv_files)
+        tables = extract_and_transform_csvs(engine, schema, table_csv_files, nrows=100)
         if tables and table_name in tables:
             validate_all_tables(engine, schema, tables)
         del tables
@@ -1898,8 +1898,13 @@ def load_csvs_to_db(results_list: Optional[list] = None, incremental: bool = Fal
         # for full-refresh runs and brand-new tables, which need the complete frame
         # to infer/replace the schema; these are rare and typically small.
         db_struct = get_db_structure(engine, schema, table_name)
-        if incremental and db_struct is not None:
+        if db_struct is not None:
             logging.info("Loading data for '%s'...", table_name)
+            if not incremental:
+                if instance_list:
+                    delete_instance_data(engine, schema, table_name, instance_list)
+                else:
+                    truncate_table(engine, schema, table_name)
             load_table_streaming(
                 engine, schema, table_name, table_csv_files,
                 db_struct, results_index=results_index,
