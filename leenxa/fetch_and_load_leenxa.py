@@ -1,5 +1,7 @@
 import os
 import sys
+import glob
+import re
 import logging
 import psycopg2
 import psycopg2.extras
@@ -234,26 +236,35 @@ def main():
                 
             logging.info(f"Sync complete for {src_table}. Total rows processed: {total_loaded}")
             
-        # 5. Create / Refresh Materialized View
-        sql_view_path = os.path.join(base_dir, "sql", "01_opportunities_view.sql")
-        if os.path.exists(sql_view_path):
-            logging.info("Executing materialized view script...")
-            with open(sql_view_path, 'r') as f:
-                view_sql = f.read()
+        # 5. Create / Refresh Materialized Views
+        sql_dir = os.path.join(base_dir, "sql")
+        sql_files = sorted(glob.glob(os.path.join(sql_dir, "*.sql")))
+        if sql_files:
+            for sql_file in sql_files:
+                filename = os.path.basename(sql_file)
+                logging.info(f"Executing view script: {filename}...")
+                with open(sql_file, 'r', encoding='utf-8') as f:
+                    view_sql = f.read()
+                    
+                # First execute the creation script (with IF NOT EXISTS)
+                dest_cur.execute(view_sql)
+                dest_conn.commit()
                 
-            # First execute the creation script (with IF NOT EXISTS)
-            dest_cur.execute(view_sql)
-            dest_conn.commit()
-            
-            # Then execute refresh
-            logging.info("Refreshing materialized view...")
-            dest_cur.execute(sql.SQL('REFRESH MATERIALIZED VIEW {}.opportunities_view;').format(
-                sql.Identifier(dest_schema)
-            ))
-            dest_conn.commit()
-            logging.info("Materialized view refreshed successfully!")
+                # Extract view name using regex for REFRESH MATERIALIZED VIEW
+                match = re.search(r'CREATE\s+MATERIALIZED\s+VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[\w"]+\.)?["\']?([\w]+)["\']?', view_sql, re.IGNORECASE)
+                if match:
+                    view_name = match.group(1)
+                    logging.info(f"Refreshing materialized view {dest_schema}.{view_name}...")
+                    dest_cur.execute(sql.SQL('REFRESH MATERIALIZED VIEW {}.{};').format(
+                        sql.Identifier(dest_schema),
+                        sql.Identifier(view_name)
+                    ))
+                    dest_conn.commit()
+                    logging.info(f"Materialized view {view_name} refreshed successfully!")
+                else:
+                    logging.warning(f"Could not extract view name from {filename} for refresh.")
         else:
-            logging.warning(f"Materialized view script not found at {sql_view_path}!")
+            logging.warning("No SQL view files found in sql directory!")
             
     except Exception as e:
         logging.exception("An error occurred during Leenxa ETL execution:")
