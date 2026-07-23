@@ -11,7 +11,7 @@ LOCAL_DIR="leenxa"
 # -v: verbose
 # -z: compress during transfer
 export SSHPASS='84pVrZ6c5XVwF9dnl45jd'
-sshpass -e rsync -avz \
+sshpass -e rsync -avz -e "ssh -o StrictHostKeyChecking=no" \
   --exclude 'csv_files' \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
