@@ -6,6 +6,7 @@ SELECT
   i."createdBy" AS insurance_info_created_by,
   i."clientName" AS insurance_info_client_name,
   i."subscriberName" AS insurance_info_subscriber_name,
+  i."insuranceProvider" AS insurance_provider_1,
   i."sunshineCenter" AS ins_info_sunshine_center,
   i."verificationStatus" AS insurance_info_verification_status,
   i."completedAt" AS insurance_info_completed_at,
