@@ -14,12 +14,8 @@ SELECT
   o."processingStatus" AS processing_status,
   o."stage" AS stage,
 
-  i."insuranceProvider" AS insurance_provider_1,
-  i."clientName" AS client_name,
-
   u.name AS user_name
   
 FROM leenxa.opportunities AS o
-LEFT JOIN leenxa."insuranceInfo" AS i ON o."insuranceInformationId" = i.id
 LEFT JOIN leenxa."User" AS u ON o."vobAgentId" = u.id
 LEFT JOIN leenxa."LocRates" AS lr ON o."sunshineCenter" ~ '^\d+$' AND lr.id = o."sunshineCenter"::int;
