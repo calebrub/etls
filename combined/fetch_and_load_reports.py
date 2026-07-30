@@ -1313,6 +1313,10 @@ def extract_and_transform_csvs(engine, schema: str, csv_files: list, nrows: Opti
         # Coerce column types to the target DB schema when the table already exists
         db_struct = get_db_structure(engine, schema, table_name)
         if db_struct is not None:
+            db_cols_set = {col for col, _ in db_struct if col not in ('row_hash', 'created_at', 'instance_key')}
+            for col in db_cols_set:
+                if col not in df.columns:
+                    df[col] = None
             df = coerce_df_to_db_schema(df, db_struct)
         else:
             df = promote_numeric_columns(df)
@@ -1408,6 +1412,10 @@ def _transform_chunk(
         df = df.drop(columns=['instance_key'])
 
     df.columns = [safe_column_name(c) for c in df.columns]
+    db_cols_set = {col for col, _ in db_struct if col not in ('row_hash', 'created_at', 'instance_key')}
+    for col in db_cols_set:
+        if col not in df.columns:
+            df[col] = None
     df = coerce_df_to_db_schema(df, db_struct)
 
     # Columns entirely null in this chunk but not part of the DB schema become
