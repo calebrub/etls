@@ -5,7 +5,7 @@ POSTGRES = {
     'password': 'uO63mP5df9KvLhVZZHdkr3cG',
     'database': 'REVETLCUSPRODDB',
     'port': '5432',
-    'schema': 'staging',
+    'schema': 'dw_combined',
 }
 
 INSTANCES = {
@@ -42,8 +42,9 @@ INSTANCES = {
                 "name": "payment_trend",
                 "account_filters": [
                     {"account": "10023994", "filter_id": "10147417"}, #last_7_days
-                    # {"account": "10023994", "filter_id": "10147412"},#last_9_months
-                    # {"account": "10023994", "filter_id": "10147267"},#last_12_months
+                    {"account": "10026716", "filter_id": "10148446"}, #Embrace Treatment override
+                    # {"account": "10023994", "filter_id": "10147415"}, #last_9_months
+                    # {"account": "10023994", "filter_id": "10147267"}, #last_12_months
                 ]
              },
             {"report_id": "10066805", "filter_id": "10147221", "name": "rcm_productivity"},  # Active: tableau | Options: this_week: 10147222, this_month: 10147223, yesterday: 10147224, last_30_days: 10147704
