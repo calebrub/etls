@@ -23,7 +23,14 @@ WITH wot_cte AS (
         wot.created_at,
         wot.adjustment_code,
         wot.adj_code_description,
+        wot.charge_cpt_code,
+        wot.credit_applied,
+        wot.insurance_adjustment_amount,
+        wot.credit_amount,
         -- numeric cleaning for currency
+        NULLIF(replace(replace(wot.credit_applied, '$', ''), ',', ''), '')::numeric AS int_credits_applied,
+        NULLIF(replace(replace(wot.insurance_adjustment_amount, '$', ''), ',', ''), '')::numeric AS int_insurance_adjustment_amount,
+        NULLIF(replace(replace(wot.credit_amount, '$', ''), ',', ''), '')::numeric AS int_credit_amount,
         NULLIF(replace(replace(wot.patient_total_credits, '$', ''), ',', ''), '')::numeric AS int_patient_total_credits,
         NULLIF(replace(replace(wot.payment_total_applied, '$', ''), ',', ''), '')::numeric AS int_payment_total_applied,
         NULLIF(replace(replace(wot.patient_ins_credits, '$', ''), ',', ''), '')::numeric AS int_patient_ins_credits,
@@ -50,9 +57,16 @@ SELECT
         WHEN days_on_hold > 60 AND days_on_hold <= 90 THEN '61-90 days'
         WHEN days_on_hold > 90 THEN 'over 90 days'
         ELSE NULL
-    END AS days_on_hold_range
+    END AS days_on_hold_range,
+    COALESCE(wotc.adjustment_type, 'UNCATEGORIZED ADJUSTMENT') AS adjustment_type
 FROM wot_cte wc
-LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = wc.credit_payer_name;
+LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = wc.credit_payer_name
+LEFT JOIN (
+    SELECT DISTINCT ON (adjustment_code)
+        adjustment_code,
+        adjustment_type
+    FROM write_off_trends_crosswalk
+) wotc ON wotc.adjustment_code = COALESCE(NULLIF(wc.adjustment_code, ''), 'Null');
 
 CREATE INDEX IF NOT EXISTS idx_write_off_trend_account ON write_off_trend_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_write_off_trend_instance_key ON write_off_trend_view(instance_key);

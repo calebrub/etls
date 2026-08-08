@@ -106,11 +106,18 @@ SELECT
         REGEXP_REPLACE(split_part(qp_cte.practice_name, ' ', 1), '\s+', '', 'g'),
         REGEXP_REPLACE(pnc.payer_code, '\s+', '', 'g'),
         REGEXP_REPLACE(coalesce(loc1.level_of_care, loc2.level_of_care), '\s+', '', 'g')
-    ) AS unique_id
+    ) AS unique_id,
+    COALESCE(fr.inn_oon, 'OON') AS inn_oon,
+    COALESCE(fr.inn_oon, 'OON') AS network_status
 FROM qp_cte
 LEFT JOIN loc_crosswalk loc1 ON loc1.rev_code = qp_cte.clean_rev_code
 LEFT JOIN loc_crosswalk loc2 ON loc2.rev_code = qp_cte.clean_cpt_code
-LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = qp_cte.payer_name;
+LEFT JOIN payer_name_crosswalk pnc ON pnc.payer_name = qp_cte.payer_name
+LEFT JOIN facility_rates fr ON fr.unique_id = CONCAT(
+    REGEXP_REPLACE(split_part(qp_cte.practice_name, ' ', 1), '\s+', '', 'g'),
+    REGEXP_REPLACE(pnc.payer_code, '\s+', '', 'g'),
+    REGEXP_REPLACE(coalesce(loc1.level_of_care, loc2.level_of_care), '\s+', '', 'g')
+);
 
 CREATE INDEX IF NOT EXISTS idx_quadrant_perf_account ON quadrant_performance_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_quadrant_perf_instance_key ON quadrant_performance_view(instance_key);
@@ -118,3 +125,4 @@ CREATE INDEX IF NOT EXISTS idx_quadrant_perf_received_date ON quadrant_performan
 CREATE INDEX IF NOT EXISTS idx_quadrant_perf_unique_id ON quadrant_performance_view(unique_id);
 
 REFRESH MATERIALIZED VIEW quadrant_performance_view;
+

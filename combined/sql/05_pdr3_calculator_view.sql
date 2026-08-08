@@ -63,50 +63,59 @@ enriched AS (
 )
 
 SELECT
-    customer_account,
-    instance_key,
-    facility_name,
-    practice_name,
-    location_code,
-    charge_cpt_code,
-    charge_rev_code,
-    loc,
-    charge_amount,
-    payment_allowed_amount,
-    primary_group_number,
-    primary_member_id,
-    credit_payer_name,
-    payer_class,
-    NULLIF(replace(replace(insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric as insurance_paid_amount,
-    patient_paid_amount_w_copays,
-    total_payment_received,
-    payment_received,
-    payment_entered,
-    charge_from_date,
-    charge_to_date,
-    primary_ins_zip,
-    primary_ins_city,
-    primary_ins_state,
-    primary_ins_addr_1,
-    patient_zip,
-    patient_city,
-    patient_state,
-    patient_address_1,
-    charge_balance_due_ins,
-    status,
-    charge_balance_due_pat,
-    charge_balance_at_collections,
+    e.customer_account,
+    e.instance_key,
+    e.facility_name,
+    e.practice_name,
+    e.location_code,
+    e.charge_cpt_code,
+    e.charge_rev_code,
+    e.loc,
+    e.charge_amount,
+    e.payment_allowed_amount,
+    e.primary_group_number,
+    e.primary_member_id,
+    e.credit_payer_name,
+    e.payer_class,
+    NULLIF(replace(replace(e.insurance_paid_amount::text, '$', ''), ',', ''), '')::numeric as insurance_paid_amount,
+    e.patient_paid_amount_w_copays,
+    e.total_payment_received,
+    e.payment_received,
+    e.payment_entered,
+    e.charge_from_date,
+    e.charge_to_date,
+    e.primary_ins_zip,
+    e.primary_ins_city,
+    e.primary_ins_state,
+    e.primary_ins_addr_1,
+    e.patient_zip,
+    e.patient_city,
+    e.patient_state,
+    e.patient_address_1,
+    e.charge_balance_due_ins,
+    e.status,
+    e.charge_balance_due_pat,
+    e.charge_balance_at_collections,
 
     -- Unique ID
     CONCAT(
-        REGEXP_REPLACE(location_code, '\s+', '', 'g'),
-        REGEXP_REPLACE(payer_class, '\s+', '', 'g'),
-        REGEXP_REPLACE(loc, '\s+', '', 'g')
-         ) AS unique_id,
+        REGEXP_REPLACE(e.location_code, '\s+', '', 'g'),
+        REGEXP_REPLACE(e.payer_class, '\s+', '', 'g'),
+        REGEXP_REPLACE(e.loc, '\s+', '', 'g')
+    ) AS unique_id,
 
-    created_at
+    COALESCE(fr.inn_oon, 'OON') AS inn_oon,
+    COALESCE(fr.inn_oon, 'OON') AS network_status,
 
-FROM enriched;
+    e.created_at
+
+FROM enriched e
+LEFT JOIN dw_combined.facility_rates fr
+    ON fr.unique_id = CONCAT(
+        REGEXP_REPLACE(e.location_code, '\s+', '', 'g'),
+        REGEXP_REPLACE(e.payer_class, '\s+', '', 'g'),
+        REGEXP_REPLACE(e.loc, '\s+', '', 'g')
+    );
 
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_account ON pdr3_calculator_view(customer_account);
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_entered ON pdr3_calculator_view(payment_entered);
@@ -115,3 +124,4 @@ CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_instance_key ON pdr3_calculator_v
 CREATE INDEX IF NOT EXISTS idx_pdr3_calculator_unique_id ON pdr3_calculator_view(unique_id);
 
 REFRESH MATERIALIZED VIEW pdr3_calculator_view;
+

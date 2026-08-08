@@ -9,6 +9,7 @@ SELECT
     p.unique_id,
     fr.rate,
     fr.inn_oon,
+    fr.inn_oon AS network_status,
 
     -- rate calculation
     ROUND(AVG(p.total_payment_received), 2) AS revenue_recognized,
