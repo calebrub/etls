@@ -15,7 +15,8 @@ SELECT
   (EXTRACT(EPOCH FROM (i."completedAt" - i."createdAt")) / 3600) AS turn_around_time_hours, 
   i."organizationId" AS ins_info_organisation_id, 
   i."vobStage" AS ins_info_vob_stage,
-  COALESCE(lr.client_name, i."sunshineCenter") AS sunshine_center_name
+  COALESCE(lr.client_name, i."sunshineCenter") AS sunshine_center_name,
+  NOW() AS data_as_of
   
 FROM leenxa."insuranceInfo" AS i
 LEFT JOIN leenxa."LocRates" AS lr 
@@ -27,4 +28,6 @@ LEFT JOIN leenxa."LocRates" AS lr
     END
   )
   
-WHERE i."id" IS NOT NULL AND i."id" != '';
+WHERE i."id" IS NOT NULL AND i."id" != ''
+  AND i."createdBy" IS NOT NULL 
+  AND i."createdBy" NOT IN ('', ' ');
