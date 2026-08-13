@@ -24,10 +24,12 @@ WITH wot_cte AS (
         wot.adjustment_code,
         wot.adj_code_description,
         wot.charge_cpt_code,
+        wot.charge_amount,
         wot.credit_applied,
         wot.insurance_adjustment_amount,
         wot.credit_amount,
         -- numeric cleaning for currency
+        NULLIF(replace(replace(wot.charge_amount, '$', ''), ',', ''), '')::numeric AS int_charge_amount,
         NULLIF(replace(replace(wot.credit_applied, '$', ''), ',', ''), '')::numeric AS int_credits_applied,
         NULLIF(replace(replace(wot.insurance_adjustment_amount, '$', ''), ',', ''), '')::numeric AS int_insurance_adjustment_amount,
         NULLIF(replace(replace(wot.credit_amount, '$', ''), ',', ''), '')::numeric AS int_credit_amount,
