@@ -49,7 +49,7 @@ INSTANCES = {
             {"report_id": "10066805", "filter_id": "10147221", "name": "rcm_productivity"},  # Active: tableau | Options: this_week: 10147222, this_month: 10147223, yesterday: 10147224, last_30_days: 10147704
             {"report_id": "10078520", "filter_id": "10147246", "name": "user_time_spread"},  # Active: all_tableau | Options: this_week: 10147247, this_month: 10147248, yesterday: 10147249, last_30_days: 10147709
             {"report_id": "10078521", "filter_id": "10147252", "name": "write_off_trend"},  # Active: all_tableau | Options: this_week: 10147253, this_month: 10147254, yesterday: 10147255, last_30_days: 10147710
-            {"report_id": "10078522", "filter_id": "10141931", "name": "pdr3_calculator"},  # Active: tableau | Options: this_week: 10147359, this_month: 10147360, yesterday: 10147361, last_30_days: 10147701
+            {"report_id": "10078522", "filter_id": "10149052", "name": "pdr3_calculator"},  # Active: tableau | Options: this_week: 10147359, this_month: 10147360, yesterday: 10147361, last_30_days: 10147701
             {"report_id": "10078523", "filter_id": "10141932", "name": "rev_rec_charges"},  # Active: tableau | Options: this_week: 10147229, this_month: 10147230, yesterday: 10147231, last_30_days: 10147706
             {
                 "report_id": "10078524",

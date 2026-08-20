@@ -62,7 +62,7 @@ SELECT
     'Week' || to_char(pt.payment_received::date::timestamp with time zone, 'IW') AS payment_received_week,
     to_char(pt.payment_received::date::timestamp with time zone, 'Month') AS payment_received_month,
     to_char(pt.payment_received::date::timestamp with time zone, 'YYYY') AS payment_received_year,
-    pt.payment_received::date - pt.payment_entered::date AS payment_posting_tat,
+    pt.payment_entered::date - pt.payment_received::date AS payment_posting_tat,
     NULLIF(replace(replace(pt.patient_applied_amount::text, '$', ''), ',', ''), '')::numeric AS int_payment_applied_amount,
     NULLIF(replace(replace(pt.payment_total_applied::text, '$', ''), ',', ''), '')::numeric AS int_payment_total_applied,
     NULLIF(replace(replace(pt.payment_total_paid::text, '$', ''), ',', ''), '')::numeric AS int_payment_total_paid,
